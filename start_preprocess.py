@@ -59,7 +59,7 @@ resZ = 0
 runImageJ_Script = True #False
 useMeasuredThickness = False
 removeCurtaining = 1
-createLogVideos = False
+createLogVideos = "n"
 showDebuggingOutput = False
 outputType = 0 # standard output type (y-axis value) is area-%
 thresholdLimit = 140
@@ -69,9 +69,9 @@ pixelScale  = 0
 
 def processArguments():
     argv = sys.argv[1:]
-    usage = sys.argv[0] + " [-h] [-i] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]"
+    usage = sys.argv[0] + " [-h] [-i] [-l <i / a>] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]"
     try:
-        opts, args = getopt.getopt(argv,"himclt:d",["noImageJ="])
+        opts, args = getopt.getopt(argv,"himcl:t:d",["noImageJ="])
         for opt, arg in opts:
             if opt == '-h':
                 print( 'usage: ' + usage )
@@ -79,7 +79,7 @@ def processArguments():
                 print( '-i, --noImageJ       : skip ImageJ processing' )
                 print( '-m                   : use measured mean stack thickness instead of defined thickness' )
                 print( '-c                   : disable curtaining removal' )
-                print( '-l                   : create log videos' )
+                print( '-l                   : create log videos (n=none, i=ion only, a=all)' )
                 print( '-t                   : set threshold limit (0-255)' )
                 print( '-d                   : show debug output' )
                 print( '' )
@@ -97,9 +97,13 @@ def processArguments():
                 global removeCurtaining
                 removeCurtaining = 0
             elif opt in ("-l"):
-                print( 'creating log videos!' )
-                global createLogVideos
-                createLogVideos = True
+                if ( arg == "i" or arg == "a" ):
+                    global createLogVideos
+                    createLogVideos = arg
+                    if( arg == "i" ):
+                        print( 'creating ion alignment video!' )
+                    else:
+                        print( 'creating all log videos!' )
             elif opt in ("-t"):
                 if ( int( arg ) < 256 and int( arg ) > -1 ):
                     global thresholdLimit
@@ -126,6 +130,18 @@ def analyseImages( directory ):
         print( "Error" )#"returned error (code {}): {}".format(e.returncode, e.output))
         pass
 
+def convertToMP4( directory, filename ):
+    sizeZ = voxelSizeZ
+    if ( useMeasuredThickness ):
+        sizeZ = round( measuredThickness/resZ*1000000000, 7 )
+    command = "ffmpeg.exe -i '" + directory + filename + ".avi' -c:v libx264 -crf 19 -preset slow -vf \"scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease\" '" + directory + filename + ".mp4'"
+    print( "starting ffmpeg conversion..." )
+    if ( showDebuggingOutput ) : print( command )
+    try:
+        subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        print( "Error" )#"returned error (code {}): {}".format(e.returncode, e.output))
+        pass
 def cmdExists(cmd):
     return shutil.which(cmd) is not None
 
@@ -244,7 +260,7 @@ def readProjectData( directory ):
     if ( not os.path.isfile( projectDataXML ) ):
         projectDataXML = filedialog.askopenfilename(title='Please select ProjectData.dat')
         projectDir = os.path.abspath(os.path.join(projectDataXML, os.pardir))
-    if ( createLogVideos ): processLogImages( projectDir )
+    if ( createLogVideos != "n" ): processLogImages( projectDir )
     tree = ET.parse( projectDataXML )
     root = tree.getroot()
     for child in root:
@@ -279,6 +295,7 @@ def logImagesToAvi( directory, workingDirectory, filename ):
     command = "ffmpeg.exe -i '" + directory +  "\\" + filename + ".avi' -c:v libx265 -crf 19 -preset slow " + filename + ".mp4"
 
 def processLogImages( directory ):
+    global createLogVideos
     #eAlignBeamList = []
     #eAlignStageList = []
     #ionAlignList = []
@@ -294,22 +311,27 @@ def processLogImages( directory ):
         for file in os.listdir(logDirectory):
             filename = os.fsdecode(file)
             if ( filename.endswith(".tif") or filename.endswith(".TIF")):
-                if ( "Electron - Alignment (BeamShift)" in filename ) :
-                    if ( not os.path.isdir( eAlignBeamDir ) ) : os.mkdir( eAlignBeamDir )
-                    os.rename( logDirectory + filename, eAlignBeamDir + filename )
-                if ( "Electron - Alignment (StageMove)" in filename ) :
-                    if ( not os.path.isdir( eAlignStageDir ) ) : os.mkdir( eAlignStageDir )
-                    os.rename( logDirectory + filename, eAlignStageDir + filename )
+                if ( createLogVideos == "a" ):
+                    if ( "Electron - Alignment (BeamShift)" in filename ) :
+                        if ( not os.path.isdir( eAlignBeamDir ) ) : os.mkdir( eAlignBeamDir )
+                        os.rename( logDirectory + filename, eAlignBeamDir + filename )
+                    if ( "Electron - Alignment (StageMove)" in filename ) :
+                        if ( not os.path.isdir( eAlignStageDir ) ) : os.mkdir( eAlignStageDir )
+                        os.rename( logDirectory + filename, eAlignStageDir + filename )
                 if ( "Ion - Alignment" in filename ) :
                     if ( not os.path.isdir( ionAlignDir ) ) : os.mkdir( ionAlignDir )
                     os.rename( logDirectory + filename, ionAlignDir + filename )
-    #if ( os.path.isdir( eAlignBeamDir ) ) :
-    #    logImagesToAvi( directory, eAlignBeamDir, eAlignBeam )
-    #if ( os.path.isdir( eAlignStageDir ) ) :
-    #    logImagesToAvi( directory, eAlignStageDir, eAlignStage )
+    if ( createLogVideos == "a" ):
+        if ( os.path.isdir( eAlignBeamDir ) ) :
+            if ( runImageJ_Script ) : logImagesToAvi( directory, eAlignBeamDir, eAlignBeam )
+            convertToMP4( directory + "\\", eAlignBeam )
+        if ( os.path.isdir( eAlignStageDir ) ) :
+            if ( runImageJ_Script ) : logImagesToAvi( directory, eAlignStageDir, eAlignStage )
+            convertToMP4( directory + "\\", eAlignStage )
     if ( os.path.isdir( ionAlignDir ) ) :
-        logImagesToAvi( directory, ionAlignDir, ionAlign )
-    #.\ffmpeg.exe -i 'D:\Avizo-Projekte\2019_02_12 C3S 10 Monate\Animation2.avi' -c:v libx265 -crf 19 -preset slow out2.mp4
+        if ( runImageJ_Script ) : logImagesToAvi( directory, ionAlignDir, ionAlign )
+        convertToMP4( directory + "\\", ionAlign )
+    
 
 processArguments()
 if ( showDebuggingOutput ) : print( "I am living in '" + home_dir + "'" )
