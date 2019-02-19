@@ -1,7 +1,7 @@
 // Macro for ImageJ 1.52d for Windows
 // written by Florian Kleiner 2019
 // run from commandline as follows
-// ImageJ-win64.exe -macro "C:\path\to\FFT Stack.ijm" "D:\path\to\data\|threshold|scaleX|scaleY|scaleZ|removeCurtaining"
+// ImageJ-win64.exe -macro "C:\path\to\FFT_Stack.ijm" "D:\path\to\data\|threshold|scaleX|scaleY|scaleZ|removeCurtaining"
 
 macro "REMPorenanalyse" {
 	// check if an external argument is given or define the options

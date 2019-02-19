@@ -2,10 +2,9 @@
 # Automated Alignment and data preparation for FIB/SEM 
 # image stacks
 #
-# © Florian Kleiner
+# © 2019 Florian Kleiner
 #   Bauhaus-Universität Weimar
 #   Finger-Institut für Baustoffkunde
-#   Februar 2019
 #
 # programmed using python 3.7, gnuplot 5.2,
 # Fiji/ImageJ 1.52k
@@ -31,10 +30,9 @@ print("#########################################################")
 print("# Automated Alignment and data preparation for FIB/SEM  #")
 print("# image stacks                                          #")
 print("#                                                       #")
-print("# © Florian Kleiner                                     #")
+print("# © 2019 Florian Kleiner                                #")
 print("#   Bauhaus-Universität Weimar                          #")
 print("#   Finger-Institut für Baustoffkunde                   #")
-print("#   Februar 2019                                        #")
 print("#                                                       #")
 print("#########################################################")
 print()
@@ -71,11 +69,12 @@ pixelScale  = 0
 
 def processArguments():
     argv = sys.argv[1:]
+    usage = sys.argv[0] + " [-h] [-i] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]"
     try:
         opts, args = getopt.getopt(argv,"himclt:d",["noImageJ="])
         for opt, arg in opts:
             if opt == '-h':
-                print( 'usage: start_process.py [-h] [-i] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]' )
+                print( 'usage: ' + usage )
                 print( '-h,                  : show this help' )
                 print( '-i, --noImageJ       : skip ImageJ processing' )
                 print( '-m                   : use measured mean stack thickness instead of defined thickness' )
@@ -111,7 +110,7 @@ def processArguments():
                 global showDebuggingOutput
                 showDebuggingOutput = True
     except getopt.GetoptError:
-        print( 'start_process.py -i -d -t <thresholdLimit>' )
+        print( usage )
     print( '' )
 
 def analyseImages( directory ):
