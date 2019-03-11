@@ -1,12 +1,15 @@
 // Macro for ImageJ 1.52d for Windows
 // written by Florian Kleiner 2019
 // run from commandline as follows
-// ImageJ-win64.exe -macro "C:\path\to\FFT_Stack.ijm" "D:\path\to\data\|threshold|scaleX|scaleY|scaleZ|removeCurtaining"
+// ImageJ-win64.exe -macro "C:\path\to\FFT_Stack.ijm" "D:\path\to\data\|threshold|scaleX|scaleY|scaleZ|removeCurtaining|startFrame|endFrame"
 
 macro "REMPorenanalyse" {
 	// check if an external argument is given or define the options
 	arg = getArgument();
-	removeCurtaining = true
+	removeCurtaining = true;
+	startFrame = 0;
+	endFrame = 0;
+	frameNumber = endFrame - startFrame;
 	if ( arg == "" ) {
 		dir = getDirectory("Choose the working directory");
 		scaleX = getNumber("Voxel size in X direction [nm]", 1);
@@ -19,8 +22,10 @@ macro "REMPorenanalyse" {
 		scaleY			= arg_split[3];
 		scaleZ			= arg_split[4];
 		if ( parseInt(arg_split[5]) == 0 ) {
-			removeCurtaining = false
+			removeCurtaining = false;
 		}
+		startFrame		= arg_split[6];
+		endFrame		= arg_split[7];
 	}
 	print("Starting process using the following arguments...");
 	print("Directory: " + dir);
@@ -53,38 +58,42 @@ macro "REMPorenanalyse" {
 				//////////////////////
 				filename = getTitle();
 				print( filename );
-				baseName		= substring(filename, 0, lengthOf(filename)-4);
-				fftName			= baseName + "-fft.tif";
-				cleanName		= baseName + "-fft.tif";
-				width			= getWidth();
-				height			= getHeight();
+				if ( !File.exists(outputDirInverse + filename ) ) {
+					baseName		= substring(filename, 0, lengthOf(filename)-4);
+					fftName			= baseName + "-fft.tif";
+					cleanName		= baseName + "-fft.tif";
+					width			= getWidth();
+					height			= getHeight();
 
-				//////////////////////
-				// processing FFT
-				//////////////////////
-				run("FFT");
-				distanceFromCenter = 17;
-				FFTsize			= getWidth(); // height = width!
-				ovalHeight = FFTsize * 0.015; // 15
-				ovalWidth = FFTsize / 2 - distanceFromCenter;
+					//////////////////////
+					// processing FFT
+					//////////////////////
+					run("FFT");
+					distanceFromCenter = 17;
+					FFTsize			= getWidth(); // height = width!
+					ovalHeight = FFTsize * 0.015; // 15
+					ovalWidth = FFTsize / 2 - distanceFromCenter;
 
-				//////////////////////
-				// removing curtaining
-				//////////////////////
-				print( "  remove horizontal structures in FFT..." );
-				makeOval(0, ((FFTsize-ovalHeight)/2), ovalWidth, ovalHeight);
-				setBackgroundColor(0, 0, 0);
-				run("Clear", "slice");
-				makeOval((FFTsize/2 + distanceFromCenter), ((FFTsize-ovalHeight)/2), ovalWidth, ovalHeight);
-				run("Clear", "slice");
-				print( "  inverse FFT..." );
-				run("Inverse FFT");
-				selectWindow("FFT of " + filename);
-				//saveAs("Tiff", outputDirInverse + "FFT_" + filename );
-				close();
-				selectWindow("Inverse FFT of " + filename);
-				saveAs("Tiff", outputDirInverse + filename );
-				close();
+					//////////////////////
+					// removing curtaining
+					//////////////////////
+					print( "  remove horizontal structures in FFT..." );
+					makeOval(0, ((FFTsize-ovalHeight)/2), ovalWidth, ovalHeight);
+					setBackgroundColor(0, 0, 0);
+					run("Clear", "slice");
+					makeOval((FFTsize/2 + distanceFromCenter), ((FFTsize-ovalHeight)/2), ovalWidth, ovalHeight);
+					run("Clear", "slice");
+					print( "  inverse FFT..." );
+					run("Inverse FFT");
+					selectWindow("FFT of " + filename);
+					//saveAs("Tiff", outputDirInverse + "FFT_" + filename );
+					close();
+					selectWindow("Inverse FFT of " + filename);
+					saveAs("Tiff", outputDirInverse + filename );
+					close();
+				} else {
+					print( "  Inverse FFT already exists! Aborting..." );
+				}
 
 				//////////////////////
 				// close the main file
@@ -97,7 +106,14 @@ macro "REMPorenanalyse" {
 		}
 	}
 	print( "Creating Image Stack ..." );
-	run("Image Sequence...", "open=[" + outputDirInverse + filename + "] sort use");
+	// calculating the selected stack range
+	// Todo: plausibility check if out of range!
+	imageSeqOptions = "";
+	if ( startFrame > 0 ) imageSeqOptions = " starting=" + startFrame;
+	if ( endFrame > 0 ) {
+		imageSeqOptions = " number=" + frameNumber + imageSeqOptions;
+	}
+	run("Image Sequence...", "open=[" + outputDirInverse + filename + "]" + imageSeqOptions + " sort use");
 	invImageStackId = getImageID();
 	run("Linear Stack Alignment with SIFT", "initial_gaussian_blur=1.60 steps_per_scale_octave=3 minimum_image_size=64 maximum_image_size=1024 feature_descriptor_size=4 feature_descriptor_orientation_bins=8 closest/next_closest_ratio=0.92 maximal_alignment_error=25 inlier_ratio=0.05 expected_transformation=Translation interpolate"); // -> Plugins -> Registration
 	saveAs("Tiff", outputDirStacks + "/" + outputFileName + "_Cleaned_Stack_Aligned.Tif" );

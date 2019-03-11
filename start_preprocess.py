@@ -66,17 +66,21 @@ thresholdLimit = 140
 infoBarHeight = 0
 metricScale = 0
 pixelScale  = 0
+startFrame = 0
+endFrame = 0
 
 def processArguments():
     argv = sys.argv[1:]
-    usage = sys.argv[0] + " [-h] [-i] [-l <i / a>] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]"
+    usage = sys.argv[0] + " [-h] [-i] [-s <start frame>] [-e <end frame>] [-l <i / a>] [-m] [-c] [-o <outputType>] [-t <thresholdLimit>] [-d]"
     try:
-        opts, args = getopt.getopt(argv,"himcl:t:d",["noImageJ="])
+        opts, args = getopt.getopt(argv,"hims:e:cl:t:d",["noImageJ="])
         for opt, arg in opts:
             if opt == '-h':
                 print( 'usage: ' + usage )
                 print( '-h,                  : show this help' )
                 print( '-i, --noImageJ       : skip ImageJ processing' )
+                print( '-s                   : set starting frame (only for stack)' )
+                print( '-e                   : set end frame (only for stack)' )
                 print( '-m                   : use measured mean stack thickness instead of defined thickness' )
                 print( '-c                   : disable curtaining removal' )
                 print( '-l                   : create log videos (n=none, i=ion only, a=all)' )
@@ -92,6 +96,16 @@ def processArguments():
                 print( 'using measured mean stack thickness!' )
                 global useMeasuredThickness
                 useMeasuredThickness = True
+            elif opt in ("-s"):
+                if ( int( arg ) > 0 ):
+                    global startFrame
+                    startFrame = int( arg )
+                    print( 'start frame is set to: ' + str( startFrame ) )
+            elif opt in ("-e"):
+                if ( int( arg ) > 0 ):
+                    global endFrame
+                    endFrame = int( arg )
+                    print( 'end frame is set to:   ' + str( endFrame ) )
             elif opt in ("-c"):
                 print( 'curtaining removal deactivatd!' )
                 global removeCurtaining
@@ -121,7 +135,7 @@ def analyseImages( directory ):
     sizeZ = voxelSizeZ
     if ( useMeasuredThickness ):
         sizeZ = round( measuredThickness/resZ*1000000000, 7 )
-    command = "ImageJ-win64.exe -macro \"" + home_dir +"\FFT_Stack.ijm\" \"" + directory + "/|" + str(thresholdLimit) + "|" + str(voxelSizeX) + "|" + str(voxelSizeY) + "|" + str(sizeZ) + "|" + str(removeCurtaining) + "\""
+    command = "ImageJ-win64.exe -macro \"" + home_dir +"\FFT_Stack.ijm\" \"" + directory + "/|" + str(thresholdLimit) + "|" + str(voxelSizeX) + "|" + str(voxelSizeY) + "|" + str(sizeZ) + "|" + str(removeCurtaining) + "|" + str(startFrame) + "|" + str(endFrame) + "\""
     print( "starting ImageJ Macro..." )
     if ( showDebuggingOutput ) : print( command )
     try:
@@ -338,19 +352,21 @@ if ( showDebuggingOutput ) : print( "I am living in '" + home_dir + "'" )
 
 workingDirectory = filedialog.askdirectory(title='Please select the image / working directory')
 
-print( "Selected working directory: " + workingDirectory )
+if ( workingDirectory != "" ) :
+    print( "Selected working directory: " + workingDirectory )
+    readProjectData( workingDirectory )
 
-readProjectData( workingDirectory )
-
-#main process
-if scaleInMetaData( workingDirectory ) :
-    # use metaData in files to determine scale
-    getZResolution( workingDirectory )
-    createSizeDefinitionFile()
-    if ( runImageJ_Script and imageJInPATH() ):
-        analyseImages( workingDirectory )
+    #main process
+    if scaleInMetaData( workingDirectory ) :
+        # use metaData in files to determine scale
+        getZResolution( workingDirectory )
+        createSizeDefinitionFile()
+        if ( runImageJ_Script and imageJInPATH() ):
+            analyseImages( workingDirectory )
+    else:
+        print( "No matching metadata found!" )
 else:
-    print( "No matching metadata found!" )
+    print("No directory selected")
 
 
 print("-------")
