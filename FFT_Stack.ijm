@@ -1,12 +1,12 @@
 // Macro for ImageJ 1.52d for Windows
 // written by Florian Kleiner 2019
-// run from commandline as follows
+// run from command line as follows
 // ImageJ-win64.exe -macro "C:\path\to\FFT_Stack.ijm" "D:\path\to\data\|threshold|scaleX|scaleY|scaleZ|removeCurtaining|startFrame|endFrame"
 
 macro "REMPorenanalyse" {
 	// check if an external argument is given or define the options
 	arg = getArgument();
-	removeCurtaining = true;
+	removeCurtaining = 1;
 	startFrame = 0;
 	endFrame = 0;
 	frameNumber = endFrame - startFrame;
@@ -41,7 +41,7 @@ macro "REMPorenanalyse" {
 	print( "file: " + outputFileName );
 	list = getFileList(dir);
 	
-	// running main loop
+	// running main loop to prepare images
 	setBatchMode(true);
 	for (i=0; i<list.length; i++) {
 		path = dir+list[i];
@@ -93,6 +93,7 @@ macro "REMPorenanalyse" {
 					close();
 				} else {
 					print( "  Inverse FFT already exists! Aborting..." );
+					i = list.length; //set to abort parameter
 				}
 
 				//////////////////////
@@ -126,11 +127,15 @@ macro "REMPorenanalyse" {
 	selectImage(imageId);
 	waitForUser("Please crop the ROI", "Place a Rectangle to Crop and close this message afterwards.");
 	//make sure we have got a rectangular selection
-	if (selectionType() != 0) exit("Sorry, no rectangle selected! Aborting Macro!");
-	run("Crop");
-	saveAs("Tiff", outputDirStacks + "/" + outputFileName + "_Cropped_Stack.Tif" );
+	if (selectionType() != 0) {
+		print("No rectangle set, continue without cropping...");
+	} else {
+		run("Crop");
+		saveAs("Tiff", outputDirStacks + "/" + outputFileName + "_Cropped_Stack.Tif" );
+	}
+	print("Starting Mean3d Filtering to remove noise...");
 	run("Mean 3D...", "x=2 y=2 z=2");
-	saveAs("Tiff", outputDirStacks + "/" + outputFileName + "_Cropped_Stack_Mean3D.Tif" );
+	saveAs("Tiff", outputDirStacks + "/" + outputFileName + "_Mean3D_Stack_.Tif" );
 
 	// exit script
 	print("Done!");

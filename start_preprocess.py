@@ -82,7 +82,7 @@ def processArguments():
                 print( '-s                   : set starting frame (only for stack)' )
                 print( '-e                   : set end frame (only for stack)' )
                 print( '-m                   : use measured mean stack thickness instead of defined thickness' )
-                print( '-c                   : disable curtaining removal' )
+                print( '-c                   : define curtaining removal processes (1-4) or disable curtaining removal (0)' )
                 print( '-l                   : create log videos (n=none, i=ion only, a=all)' )
                 print( '-t                   : set threshold limit (0-255)' )
                 print( '-d                   : show debug output' )
@@ -109,7 +109,11 @@ def processArguments():
             elif opt in ("-c"):
                 print( 'curtaining removal deactivatd!' )
                 global removeCurtaining
-                removeCurtaining = 0
+                removeCurtaining = int(arg)
+                if( removeCurtaining == 0 ):
+                    print( 'curtaining removal disabled' )
+                else:
+                    print( 'curtaining removal will be started using ' + str( removeCurtaining ) + ' process(es)' )
             elif opt in ("-l"):
                 if ( arg == "i" or arg == "a" ):
                     global createLogVideos
@@ -259,7 +263,7 @@ def createSizeDefinitionFile():
     f = open( projectDir + "\size_definition.txt","w+")
     f.write( "name, X, Y, defined Z, measured Z, unit \n" )
     f.write( "voxel size, " + str(voxelSizeX) + ", " + str(voxelSizeY) + ", " + str(voxelSizeZ) + ", " + str(round(measuredThickness/resZ*1000000000, 4)) + ", nm\n" )
-    f.write( "resolution, " + str(resX) + ", " + str(resY) + ", " + str(resZ) + ", , px/slices\n" )
+    f.write( "resolution, " + str(round(resX)) + ", " + str(round(resY)) + ", " + str(round(resZ)) + ", , px/slices\n" )
     f.write( "data set size, " + str(resX*voxelSizeX/1000) + ", " + str(resY*voxelSizeY/1000) + ", " + str(resZ*voxelSizeZ/1000) + ", " + str(round(measuredThickness*1000000, 7) ) + ", µm\n" )
     f.close()
 
@@ -293,6 +297,8 @@ def readProjectData( directory ):
                         thicknesses.append(float( slice.attrib['MeasuredThickness'] ))
                     else:
                         thicknesses.append(0)
+                #if ( str( child.tag ) == "Image" ):
+                    
                     #print( str( slice.attrib['MeasuredThickness'] ) )
         #print( str( child.tag ) + ": " + str( child.attrib.text ) )
 
@@ -310,9 +316,6 @@ def logImagesToAvi( directory, workingDirectory, filename ):
 
 def processLogImages( directory ):
     global createLogVideos
-    #eAlignBeamList = []
-    #eAlignStageList = []
-    #ionAlignList = []
     logDirectory = directory + "\LogImages\\"
     eAlignBeam = "Electron Alignment BeamShift"
     eAlignStage = "Electron Alignment StageMove"
@@ -345,7 +348,6 @@ def processLogImages( directory ):
     if ( os.path.isdir( ionAlignDir ) ) :
         if ( runImageJ_Script ) : logImagesToAvi( directory, ionAlignDir, ionAlign )
         convertToMP4( directory + "\\", ionAlign )
-    
 
 processArguments()
 if ( showDebuggingOutput ) : print( "I am living in '" + home_dir + "'" )
