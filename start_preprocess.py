@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 #########################################################
-# Automated Alignment and data preparation for FIB/SEM 
+# Automated Alignment and data preparation for FIB/SEM
 # image stacks
 #
-# © 2019 Florian Kleiner
+# © 2020 Florian Kleiner
 #   Bauhaus-Universität Weimar
 #   Finger-Institut für Baustoffkunde
 #
@@ -11,7 +14,6 @@
 # don't forget to install PIL (pip install Pillow)
 #
 #########################################################
-
 
 import csv
 import os, sys, getopt
@@ -30,7 +32,7 @@ print("#########################################################")
 print("# Automated Alignment and data preparation for FIB/SEM  #")
 print("# image stacks                                          #")
 print("#                                                       #")
-print("# © 2019 Florian Kleiner                                #")
+print("# © 2020 Florian Kleiner                                #")
 print("#   Bauhaus-Universität Weimar                          #")
 print("#   Finger-Institut für Baustoffkunde                   #")
 print("#                                                       #")
@@ -276,6 +278,7 @@ def readProjectData( directory ):
     projectDataXML = projectDir + "\ProjectData.dat"
     #print( projectDataXML )
     if ( not os.path.isfile( projectDataXML ) ):
+        print("unable to find {}".format(projectDataXML))
         projectDataXML = filedialog.askopenfilename(title='Please select ProjectData.dat')
         projectDir = os.path.abspath(os.path.join(projectDataXML, os.pardir))
     if ( createLogVideos != "n" ): processLogImages( projectDir )
@@ -298,7 +301,7 @@ def readProjectData( directory ):
                     else:
                         thicknesses.append(0)
                 #if ( str( child.tag ) == "Image" ):
-                    
+
                     #print( str( slice.attrib['MeasuredThickness'] ) )
         #print( str( child.tag ) + ": " + str( child.attrib.text ) )
 
