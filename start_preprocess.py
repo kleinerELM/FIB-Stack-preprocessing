@@ -15,18 +15,11 @@
 #
 #########################################################
 
-import csv
-import os, sys, getopt
-import subprocess
-import math
+import os, sys, getopt, mmap, shutil, math, csv, subprocess, statistics
 import tkinter as tk
-import mmap
-import shutil
 import xml.etree.ElementTree as ET
-import statistics
 from PIL import Image
 from tkinter import filedialog
-from subprocess import check_output
 
 print("#########################################################")
 print("# Automated Alignment and data preparation for FIB/SEM  #")

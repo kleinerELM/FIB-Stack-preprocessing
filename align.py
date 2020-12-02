@@ -15,14 +15,15 @@
 #
 #########################################################
 
-import cv2
-import os, sys
+import os, sys, math, cv2, time
 import numpy as np
-import time
 import tkinter as tk
 from tkinter import filedialog
 import csv
 import multiprocessing
+
+from scipy.ndimage import shift
+import tifffile as tif
 
 #remove root windows
 root = tk.Tk()
@@ -73,72 +74,84 @@ def get_homography_from_translation(t_x, t_y):
 def extract_translation_from_homography(h):
     # only extract x and y movement
     # https://stackoverflow.com/questions/25658443/calculating-scale-rotation-and-translation-from-homography-matrix
-    t_x = h[0,2]
-    t_y = h[1,2]
-    return t_x, t_y
+    return h[1,2], h[0,2] # x, y
 
-# t_x, t_y, h_new = extract_translation_from_homography(h)
 MAX_FEATURES = 1000
 GOOD_MATCH_PERCENT = 0.4
-def get_image_homography(im1, im2, mask=None, filename=''):
+def get_image_homography_ORB(im1, im2, mask=None, filename=''):
     # Convert images to grayscale
     if len(im1.shape) == 3:
       im1 = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
       im2 = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
 
-    orb  = False
-    sift = True
     # Detect features and compute descriptors.
         #feature_detector = cv2.SURF_create()
-    if orb:
-        feature_detector = cv2.ORB_create(nfeatures=MAX_FEATURES)
-        keypoints1, descriptors1 = feature_detector.detectAndCompute(im1, mask)
-        keypoints2, descriptors2 = feature_detector.detectAndCompute(im2, mask)
-        # Match features.
-        matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-        matches = matcher.match(descriptors1, descriptors2, None)
-        print(matches)
-        # Sort matches by score
-        matches.sort(key=lambda x: x.distance, reverse=False)
-        # Remove not so good matches
-        numGoodMatches = int(len(matches) * GOOD_MATCH_PERCENT)
-        matches = matches[:numGoodMatches]
+    feature_detector = cv2.ORB_create(nfeatures=MAX_FEATURES)
+    keypoints1, descriptors1 = feature_detector.detectAndCompute(im1, mask)
+    keypoints2, descriptors2 = feature_detector.detectAndCompute(im2, mask)
+    # Match features.
+    matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
+    matches = matcher.match(descriptors1, descriptors2, None)
+    print(matches)
+    # Sort matches by score
+    matches.sort(key=lambda x: x.distance, reverse=False)
+    # Remove not so good matches
+    numGoodMatches = int(len(matches) * GOOD_MATCH_PERCENT)
+    matches = matches[:numGoodMatches]
 
-        # Extract location of good matches
-        points1 = np.zeros((len(matches), 2), dtype=np.float32)
-        points2 = np.zeros((len(matches), 2), dtype=np.float32)
+    # Extract location of good matches
+    points1 = np.zeros((len(matches), 2), dtype=np.float32)
+    points2 = np.zeros((len(matches), 2), dtype=np.float32)
 
-        for i, match in enumerate(matches):
-            points1[i, :] = keypoints1[match.queryIdx].pt
-            points2[i, :] = keypoints2[match.trainIdx].pt
-
-    if sift:
-        feature_detector = cv2.SIFT_create(nfeatures=MAX_FEATURES, nOctaveLayers = 3, contrastThreshold = 0.04, edgeThreshold = 5, sigma = 1.6)
-        keypoints1, descriptors1 = feature_detector.detectAndCompute(im1, mask)
-        keypoints2, descriptors2 = feature_detector.detectAndCompute(im2, mask)
-        # Match features.
-        FLANN_INDEX_KDTREE = 1
-        index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-        search_params = dict(checks = 50)
-        flann = cv2.FlannBasedMatcher(index_params, search_params)
-        matches = flann.knnMatch(descriptors1,descriptors2,k=2)
-
-        matcher = cv2.BFMatcher()
-        matches = matcher.knnMatch(descriptors1, descriptors2, k=2)
-
-        # Apply ratio test
-        good = []
-        for m,n in matches:
-            if m.distance < 0.7*n.distance:
-                good.append(m)
-
-        points1 = np.float32([ keypoints1[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
-        points2 = np.float32([ keypoints2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
-
+    for i, match in enumerate(matches):
+        points1[i, :] = keypoints1[match.queryIdx].pt
+        points2[i, :] = keypoints2[match.trainIdx].pt
 
     # Find homography
-    h, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0) # <- wtf is the 5.0 - some method??
-    #h, mask = cv2.estimateAffinePartial2D(points1, points2)# cv2.RANSAC)
+    #h, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0) # <- wtf is the 5.0 - some method??
+    h, mask = cv2.estimateAffinePartial2D(points1, points2)# cv2.RANSAC)
+
+    if not homography_is_translation(h) and filename != '':
+        # Draw top matches
+        imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
+        cv2.imwrite(os.path.dirname(os.path.realpath(__file__)) + os.sep + filename + "_matches.tif", imMatches)
+
+    return h, mask
+
+def get_image_homography_SIFT(im1, im2, mask=None, filename=''):
+    # Convert images to grayscale
+    if len(im1.shape) == 3:
+      im1 = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
+      im2 = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
+
+    orb  = True
+    sift = False#True
+    # Detect features and compute descriptors.
+    feature_detector = cv2.SIFT_create(nfeatures=MAX_FEATURES, nOctaveLayers = 3, contrastThreshold = 0.04, edgeThreshold = 5, sigma = 1.6)
+    keypoints1, descriptors1 = feature_detector.detectAndCompute(im1, mask)
+    keypoints2, descriptors2 = feature_detector.detectAndCompute(im2, mask)
+    # Match features.
+    FLANN_INDEX_KDTREE = 1
+    index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+    search_params = dict(checks = 50)
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(descriptors1,descriptors2,k=2)
+
+    matcher = cv2.BFMatcher()
+    matches = matcher.knnMatch(descriptors1, descriptors2, k=2)
+
+    # Apply ratio test
+    good = []
+    for m,n in matches:
+        if m.distance < 0.7*n.distance:
+            good.append(m)
+
+    points1 = np.float32([ keypoints1[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+    points2 = np.float32([ keypoints2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+
+    # Find homography
+    #h, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0) # <- wtf is the 5.0 - some method??
+    h, mask = cv2.estimateAffinePartial2D(points1, points2)# cv2.RANSAC)
 
     if not homography_is_translation(h) and filename != '':
         # Draw top matches
@@ -150,7 +163,8 @@ def get_image_homography(im1, im2, mask=None, filename=''):
 def alignImages(im1, im2, mask=None):
     print( "  aligning image using OpenCV2", flush=True )
 
-    h, _ = get_image_homography(im1, im2, mask)
+    h, _ = get_image_homography_ORB(im1, im2, mask)
+    #h, _ = get_image_homography_SIFT(im1, im2, mask)
 
     # Use homography
     height, width = im2.shape
@@ -187,10 +201,10 @@ def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
 # errorhandling of the homography process
 # and extraction of the results
 def image_processing_thread(filename, im1, im2, mask, mask_full):
-    gauss_kernel = (5, 3)
+    gauss_kernel = (3, 3)
 
-    im_1_denoised = im1#cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
-    im_2_denoised = im2#cv2.GaussianBlur(im2, gauss_kernel, cv2.BORDER_DEFAULT)
+    im_1_denoised = cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
+    im_2_denoised = cv2.GaussianBlur(im2, gauss_kernel, cv2.BORDER_DEFAULT)
 
     #im_1_denoised = cv2.medianBlur(im1, 5)
     #im_2_denoised = cv2.medianBlur(im2, 5)
@@ -201,11 +215,13 @@ def image_processing_thread(filename, im1, im2, mask, mask_full):
     #im_2_denoised = cv2.equalizeHist(im2)
 
     error = None
-    h, _ = get_image_homography(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
+    h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
+    #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
     if not homography_is_translation(h):
         print('  WARNING: Homography is not only a translation! Retrying full image')
         print(h)
-        h, _ = get_image_homography(im_1_denoised, im_2_denoised, mask_full, filename=filename + '_b')
+        h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask_full, filename=filename + '_b')
+        #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
 
         print(h)
         if not homography_is_translation(h):
@@ -240,7 +256,7 @@ def process_translation_of_folder_singlecore(folder, images, loaded_images):
             if error_list_line is not None:  error_list.append( error_list_line )
             translation.append(translation_line)
         else:
-            mask      = get_centered_mask(im1, mask_size = 1)#0.8)
+            mask      = get_centered_mask(im1, mask_size = .5)
             mask_full = get_centered_mask(im1, mask_size = 1)
 
         last_filename = filename
@@ -278,7 +294,7 @@ def process_translation_of_folder_multicore(folder, images, loaded_images):
             #translation_line, error_list_line = image_processing_thread(filename, im1, im2, mask, mask_full)
             pool.apply_async(image_processing_thread, args=(image, im1, im2, mask, mask_full), callback = store_result)
         else:
-            mask      = get_centered_mask(im1, mask_size = 0.75)
+            mask      = get_centered_mask(im1, mask_size = 0.9)#0.75)
             mask_full = get_centered_mask(im1, mask_size = 1)
 
     pool.close()
@@ -287,20 +303,65 @@ def process_translation_of_folder_multicore(folder, images, loaded_images):
     # results come in unsorted -> sort
     return translation, error_list
 
+def get_find_border(arr, threshold, flip=False):
+    if flip: arr = np.flip(arr)
+    for i, val in enumerate( arr ):
+        if val > threshold:
+            return i
+
+def auto_crop_stack( image_stack, threshold=10 ):
+    print(' trying to auto crop image stack (threshold={})'.format(threshold))
+    image_cnt, height, width = image_stack.shape
+    z_mean = np.mean(image_stack, axis = 0)
+    x_mean = np.mean(z_mean, axis = 0)
+    y_mean = np.mean(z_mean, axis = 1)
+    pad_left   =get_find_border(x_mean, threshold)
+    pad_right  =get_find_border(x_mean, threshold, flip=True)
+    pad_top    =get_find_border(y_mean, threshold)
+    pad_bottom =get_find_border(y_mean, threshold, flip=True)
+    print('identified padding (x_l: {}, x_r:{}, y_l: {}, y_r: {})'.format(pad_left, pad_right, pad_top, pad_bottom))
+    cropped_stack = image_stack[0:image_cnt, pad_top:height-pad_bottom, pad_left:width-pad_right]
+    return cropped_stack
+
+# wrapper for the multiprocessing of the image arrangement and the NLM processing
+def get_image_in_canvas_mp_wrapper(i, image, canvas, x_min, y_min, x_t, y_t, do_nlm):
+    canvas = get_image_in_canvas(image, canvas, x_min, y_min, x_t, y_t)
+    if do_nlm:
+        canvas = denoiseNLMCV2(canvas)
+    return i, canvas
+
+# result processing after multithreaded processing
+aligned_images = None
+def update_image_list(result):
+    global aligned_images
+
+    result = list(result)
+    aligned_images[result[0]] = result[1]
+
+# apply the translation ti the image and place it on an empty canvas
 def get_image_in_canvas(image, canvas,
-                        width, height,
                         x_min, y_min,
                         x_t, y_t):
-    #print(int(-x_min+x_t), int(width-x_min+x_t), int(-y_min+y_t), int(height-y_min+y_t), canvas.shape, image.shape)
-    #print()
-    canvas[int(-x_min+x_t):int(width-x_min+x_t), int(-y_min+y_t):int(height-y_min+y_t)] = image
+    d_x = -x_min+x_t
+    d_y = -y_min+y_t
+    skimageshift = False
+    if skimageshift:
+        im =  np.zeros(( int(image.shape[0] + math.ceil(d_x)),
+                         int(image.shape[1] + math.ceil(d_y))
+                       ), np.uint8)
+        im[0:image.shape[0], 0:image.shape[1]] = image
+        print(canvas.shape, im.shape, d_x, d_y)
+        canvas[0:im.shape[0], 0:im.shape[1]] = shift(im, shift=(d_x, d_y), mode='constant')
+    else:
+        canvas[round(d_x):round(image.shape[0]+d_x), round(d_y):round(image.shape[1]+d_y)] = image
 
     return canvas
 
 # main process function
-def process_translation_of_folder(folder=None, multicore = True):
+def process_translation_of_folder(folder=None, multicore = True, do_nlm=False):
     global translation
     global error_list
+    global aligned_images
 
     if folder is None:
         folder = filedialog.askdirectory(title='Please select the image / working directory')
@@ -309,14 +370,15 @@ def process_translation_of_folder(folder=None, multicore = True):
     for file in os.listdir(folder):
         if ( file.endswith(".tif") or file.endswith(".TIF")):
             images.append( file )
+    im_cnt = len(images)
 
-    print('loading {} images...'.format(len(images)))
+    print('loading {} images...'.format(im_cnt))
     loaded_images = []
     for image in images:
         loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
 
 
-    print("processing {} images...".format(len(images)))
+    print("processing {} images...".format(im_cnt))
     if multicore:
         process_translation_of_folder_multicore( folder, images, loaded_images)
     else:
@@ -345,25 +407,42 @@ def process_translation_of_folder(folder=None, multicore = True):
     y_min, y_max = get_translation_area( y_translation )
     print(x_min, x_max)
     print(y_min, y_max)
-    print('translating images..')
-    aligned_images = np.zeros(( len(images),
-                                int(width - x_min + x_max),
-                                int(height - y_min + y_max)
+
+    print('allocating 3D image space..')
+    aligned_images = np.zeros(( im_cnt,
+                                math.ceil(width - x_min + x_max),
+                                math.ceil(height - y_min + y_max)
                               ), np.uint8)
+    print('translating and denoising images..')
+
+    coreCount = multiprocessing.cpu_count()
+    processCount = (coreCount - 1) if coreCount > 1 else 1
+    pool = multiprocessing.Pool(processCount)
 
     x_t = 0
     y_t = 0
-    for i in range(len(x_translation)):
+    for i in range(im_cnt):
+        #print( " processing {} ({} / {})".format(image, i+1, len(images)) )
         x_t += x_translation[i]
         y_t += y_translation[i]
-        aligned_images[i] = get_image_in_canvas(loaded_images[i], aligned_images[i], width, height, x_min, y_min, x_t, y_t)
 
+        pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
+
+    pool.close()
+    pool.join()
+
+    image_stack_crop = auto_crop_stack( aligned_images, threshold=10 )
+    print('saving images..')
+    save_path = folder + 'aligned' + os.sep
+
+    if not os.path.isdir(save_path): os.makedirs(save_path)
+    tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', image_stack_crop, bigtiff=True)
+    tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', aligned_images, bigtiff=True)
 
     print('sucessfull')
     #print(aligned_images.shape)
 
-    return translation, error_list, aligned_images
-
+    return translation, error_list, image_stack_crop
 
 def write_list_to_csv( list, filename, columns=None ):
     with open(filename, 'w', newline ='') as f:
