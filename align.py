@@ -200,7 +200,7 @@ def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
 
 # errorhandling of the homography process
 # and extraction of the results
-def image_processing_thread(filename, im1, im2, mask, mask_full):
+def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
     gauss_kernel = (3, 3)
 
     im_1_denoised = cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
@@ -209,8 +209,9 @@ def image_processing_thread(filename, im1, im2, mask, mask_full):
     #im_1_denoised = cv2.medianBlur(im1, 5)
     #im_2_denoised = cv2.medianBlur(im2, 5)
 
-    #im_1_denoised = cv2.equalizeHist(im_1_denoised)
-    #im_2_denoised = cv2.equalizeHist(im_2_denoised)
+    if eq_hist:
+        im_1_denoised = cv2.equalizeHist(im_1_denoised)
+        im_2_denoised = cv2.equalizeHist(im_2_denoised)
     #im_1_denoised = cv2.equalizeHist(im1)
     #im_2_denoised = cv2.equalizeHist(im2)
 
@@ -235,7 +236,7 @@ def image_processing_thread(filename, im1, im2, mask, mask_full):
     return result, error
 
 #singlethreaded processing
-def process_translation_of_folder_singlecore(folder, images, loaded_images):
+def process_translation_of_folder_singlecore(images, loaded_images, mask_size=0.9, eq_hist=True ):
     print('processing image stack singlethreaded:')
     global translation
     global error_list
@@ -244,22 +245,18 @@ def process_translation_of_folder_singlecore(folder, images, loaded_images):
     im2 = None
     mask = None
     mask_full = None
-    last_filename = ''
     for i, filename in enumerate( images ):
-        file_path = folder + os.sep + filename
         #print( " processing {} ({} / {}):".format(filename, i+1, len(images)) )
         im2 = im1
         im1 = loaded_images[i]
         if not im2 is None:
-            translation_line, error_list_line = image_processing_thread(filename, im1, im2, mask, mask_full)
+            translation_line, error_list_line = image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist)
 
             if error_list_line is not None:  error_list.append( error_list_line )
             translation.append(translation_line)
         else:
-            mask      = get_centered_mask(im1, mask_size = .5)
-            mask_full = get_centered_mask(im1, mask_size = 1)
-
-        last_filename = filename
+            mask      = get_centered_mask(im1, mask_size=mask_size)
+            mask_full = get_centered_mask(im1, mask_size=1)
 
     return translation, error_list
 
@@ -272,7 +269,7 @@ def store_result(result):
     translation.append(result[0])
     if not result[1] is None:  error_list.append( result[1] )
 
-def process_translation_of_folder_multicore(folder, images, loaded_images):
+def process_translation_of_folder_multicore(images, loaded_images, mask_size=0.9, eq_hist=True):
     print('processing image stack multithreaded:')
     global translation
     global error_list
@@ -292,10 +289,10 @@ def process_translation_of_folder_multicore(folder, images, loaded_images):
         im1 = loaded_images[i]
         if not im2 is None:
             #translation_line, error_list_line = image_processing_thread(filename, im1, im2, mask, mask_full)
-            pool.apply_async(image_processing_thread, args=(image, im1, im2, mask, mask_full), callback = store_result)
+            pool.apply_async(image_processing_thread, args=(image, im1, im2, mask, mask_full, eq_hist), callback = store_result)
         else:
-            mask      = get_centered_mask(im1, mask_size = 0.9)#0.75)
-            mask_full = get_centered_mask(im1, mask_size = 1)
+            mask      = get_centered_mask(im1, mask_size=mask_size)
+            mask_full = get_centered_mask(im1, mask_size=1)
 
     pool.close()
     pool.join()
@@ -358,7 +355,11 @@ def get_image_in_canvas(image, canvas,
     return canvas
 
 # main process function
-def process_translation_of_folder(folder=None, multicore = True, do_nlm=False):
+# do_nlm      : bool | will apply non local mean filter if True
+# mask_size   : float 0.0 - 1.0 | defines the size of the mask, which defines the area used for feature detection
+# eq_hist     : bool | improve histogram for feature detection
+# crop_thresh : in 0 - 255 | brightness value used for the auto cropper (disable with 0)
+def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, mask_size=0.9, eq_hist=True, crop_thresh=0 ):
     global translation
     global error_list
     global aligned_images
@@ -377,12 +378,11 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False):
     for image in images:
         loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
 
-
     print("processing {} images...".format(im_cnt))
     if multicore:
-        process_translation_of_folder_multicore( folder, images, loaded_images)
+        process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
     else:
-        process_translation_of_folder_singlecore(folder, images, loaded_images)
+        process_translation_of_folder_singlecore( images, loaded_images, mask_size, eq_hist )
 
     print("processing basic data...")
     width, height = loaded_images[0].shape
@@ -431,18 +431,19 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False):
     pool.close()
     pool.join()
 
-    image_stack_crop = auto_crop_stack( aligned_images, threshold=10 )
     print('saving images..')
     save_path = folder + 'aligned' + os.sep
-
     if not os.path.isdir(save_path): os.makedirs(save_path)
-    tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', image_stack_crop, bigtiff=True)
+
     tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', aligned_images, bigtiff=True)
 
-    print('sucessfull')
-    #print(aligned_images.shape)
+    if crop_thresh > 0:
+        aligned_images = auto_crop_stack( aligned_images, threshold=crop_thresh )
+        tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', image_stack_crop, bigtiff=True)
 
-    return translation, error_list, image_stack_crop
+    print('sucessfull')
+
+    return translation, error_list, aligned_images
 
 def write_list_to_csv( list, filename, columns=None ):
     with open(filename, 'w', newline ='') as f:
