@@ -135,3 +135,5 @@ dmypy.json
 
 *geckodriver*
 .vscode
+
+*.tif

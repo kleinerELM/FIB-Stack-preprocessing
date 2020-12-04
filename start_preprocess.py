@@ -20,17 +20,19 @@ import tkinter as tk
 import xml.etree.ElementTree as ET
 from PIL import Image
 from tkinter import filedialog
+from align import *
 
-print("#########################################################")
-print("# Automated Alignment and data preparation for FIB/SEM  #")
-print("# image stacks                                          #")
-print("#                                                       #")
-print("# © 2020 Florian Kleiner                                #")
-print("#   Bauhaus-Universität Weimar                          #")
-print("#   Finger-Institut für Baustoffkunde                   #")
-print("#                                                       #")
-print("#########################################################")
-print()
+def programInfo():
+    print("#########################################################")
+    print("# Automated Alignment and data preparation for FIB/SEM  #")
+    print("# image stacks                                          #")
+    print("#                                                       #")
+    print("# © 2020 Florian Kleiner                                #")
+    print("#   Bauhaus-Universität Weimar                          #")
+    print("#   Finger-Institut für Baustoffkunde                   #")
+    print("#                                                       #")
+    print("#########################################################")
+    print()
 
 #### directory definitions
 #outputDir_Pores = "/pores/"
@@ -50,6 +52,7 @@ measuredThickness = 0
 resX = 0
 resY = 0
 resZ = 0
+tilt_correction = 0
 
 runImageJ_Script = True #False
 useMeasuredThickness = False
@@ -179,20 +182,54 @@ def getPixelSizeFromMetaData( directory, filename ):
     global voxelSizeX
     global voxelSizeY
     global voxelSizeZ
+    global tilt_correction
     if ( voxelSizeZ == 0 ):
         voxelSizeZ = int( input("Please enter the stack slice thickness [nm]: ") )
     with open(directory + '/' + filename, 'rb', 0) as file, \
         mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as s:
         if s.find(b'PixelWidth') != -1:
+            # get pixel size for projection plane
+            # (only identical to specimen plane if tilt correction is applied correctly)
             file.seek(s.find(b'PixelWidth'))
             tempLine = str( file.readline() ).split("=",1)[1]
             voxelSizeX = float( tempLine.split("\\",1)[0] )*1000000000
             file.seek(s.find(b'PixelHeight'))
             tempLine = str( file.readline() ).split("=",1)[1]
             voxelSizeY = float( tempLine.split("\\",1)[0] )*1000000000
+            # get stage tilt to idetify the used sample holder
+            file.seek(s.find(b'StageT'))
+            tempLine = str( file.readline() ).split("=",1)[1]
+            stage_tilt = round(float( tempLine.split("\\",1)[0])*180/math.pi,3) # convert from rad to °
+            if round(stage_tilt) == 52: print(' detected standard specimen holder / flat specimen without pretilt')
+            elif round(stage_tilt) == 16: print(' detected pretilt specimen holder (EBSD-holder, pretilt: {}°)'.format(52-16))
+            else: print(' unusual specimen holder with unknown pretilt ({}°)'.format(stage_tilt))
+            # check tilt correction
+            file.seek(s.find(b'TiltCorrectionIsOn'))
+            tempLine = str( file.readline() ).split("=",1)[1]
+            if tempLine.split("\\",1)[0] == 'yes':
+                file.seek(s.find(b'TiltCorrectionAngle'))
+                tempLine = str( file.readline() ).split("=",1)[1]
+                tilt_correction = round(float( tempLine.split("\\",1)[0])*180/math.pi,3) # convert from rad to °
+                if round(tilt_correction) != 38:
+                    print(' unusual tilt correction ({}°) detected!'.format(tilt_correction))
+                else:
+                    print( " preliminary applied tilt correction: 38°" )
+
+            else:
+                tilt_correction = 0
+                # apply standard tilt correction to dataset for standard geometry
+                # - angle ionbeam/e-beam = 52 °
+                # - projection plane/specimen surface = 38 °
+                #     condition: ion beam views from the top (90° cutting angle)
+                voxelSizeY = voxelSizeY/math.cos(38)
+                print( " subsequently applied tilt correction: 38°" )
+
+
             print( " image scale X: " + str( voxelSizeX ) + " nm / px" )
             print( " image scale Y: " + str( voxelSizeY ) + " nm / px" )
             print( " image scale Z: " + str( voxelSizeZ ) + " nm / slice" )
+            #print( " stage tilt: {}°".format( stage_tilt ) )
+
     return True
 
 def getInfoBarHeightFromMetaData( directory, filename ):
@@ -200,6 +237,7 @@ def getInfoBarHeightFromMetaData( directory, filename ):
     global resX
     global resY
     global infoBarHeight
+    global tilt_correction
     with open(directory + '/' + filename, 'rb', 0) as file, \
         mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as s:
         if s.find(b'ResolutionX') != -1:
@@ -345,27 +383,37 @@ def processLogImages( directory ):
         if ( runImageJ_Script ) : logImagesToAvi( directory, ionAlignDir, ionAlign )
         convertToMP4( directory + "\\", ionAlign )
 
-processArguments()
-if ( showDebuggingOutput ) : print( "I am living in '" + home_dir + "'" )
 
-workingDirectory = filedialog.askdirectory(title='Please select the image / working directory')
 
-if ( workingDirectory != "" ) :
-    print( "Selected working directory: " + workingDirectory )
-    readProjectData( workingDirectory )
+if __name__ == '__main__':
+    programInfo()
+    processArguments()
+    if ( showDebuggingOutput ) : print( "I am living in '" + home_dir + "'" )
 
-    #main process
-    if scaleInMetaData( workingDirectory ) :
-        # use metaData in files to determine scale
-        getZResolution( workingDirectory )
-        createSizeDefinitionFile()
-        if ( runImageJ_Script and imageJInPATH() ):
-            analyseImages( workingDirectory )
+    workingDirectory = filedialog.askdirectory(title='Please select the image / working directory')
+
+    if ( workingDirectory != "" ) :
+        print( "Selected working directory: " + workingDirectory )
+        readProjectData( workingDirectory )
+
+        #main process
+        if scaleInMetaData( workingDirectory ) :
+            # use metaData in files to determine scale
+            getZResolution( workingDirectory )
+            createSizeDefinitionFile()
+
+
+
+
+
+            #translation, error_list, filled_canvas = process_translation_of_folder(folder=workingDirectory, multicore=True, do_nlm=False, mask_size=0.99, eq_hist=True, crop_thresh=11 )
+            #if ( runImageJ_Script and imageJInPATH() ):
+            #    analyseImages( workingDirectory )
+        else:
+            print( "No matching metadata found!" )
     else:
-        print( "No matching metadata found!" )
-else:
-    print("No directory selected")
+        print("No directory selected")
 
 
-print("-------")
-print("DONE!")
+    print("-------")
+    print("DONE!")

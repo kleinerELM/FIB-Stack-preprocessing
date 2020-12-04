@@ -92,7 +92,7 @@ def get_image_homography_ORB(im1, im2, mask=None, filename=''):
     # Match features.
     matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
     matches = matcher.match(descriptors1, descriptors2, None)
-    print(matches)
+
     # Sort matches by score
     matches.sort(key=lambda x: x.distance, reverse=False)
     # Remove not so good matches
@@ -219,7 +219,7 @@ def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
     h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
     #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
     if not homography_is_translation(h):
-        print('  WARNING: Homography is not only a translation! Retrying full image')
+        print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename))
         print(h)
         h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask_full, filename=filename + '_b')
         #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
@@ -227,12 +227,12 @@ def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
         print(h)
         if not homography_is_translation(h):
             error = [filename, 'ERROR']
-            print('  WARNING: Homography REALLY is not only a translation! ')
+            print('  WARNING: Homography for {} REALLY is not only a translation! '.format(filename))
         else:
             error = [filename, 'WARNING']
     t_x, t_y = extract_translation_from_homography(h)
     result = [filename, t_x, t_y]
-    print('  done processing {}'.format(filename))
+    #print('  done processing {}'.format(filename))
     return result, error
 
 #singlethreaded processing
@@ -434,12 +434,14 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
     print('saving images..')
     save_path = folder + 'aligned' + os.sep
     if not os.path.isdir(save_path): os.makedirs(save_path)
-
-    tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', aligned_images, bigtiff=True)
-
+    stack_fn = save_path + 'aligned_stack_(' + str(im_cnt) + ').tif'
+    tif.imsave(stack_fn, aligned_images, bigtiff=True)
+    print('saved "{}"'.format(stack_fn))
     if crop_thresh > 0:
         aligned_images = auto_crop_stack( aligned_images, threshold=crop_thresh )
-        tif.imsave(save_path + 'aligned_stack_(' + str(im_cnt) + ').tif', image_stack_crop, bigtiff=True)
+        cropped_fn = save_path + 'cropped.tif'
+        tif.imsave(cropped_fn, aligned_images, bigtiff=True)
+        print('saved "{}"'.format(cropped_fn))
 
     print('sucessfull')
 
