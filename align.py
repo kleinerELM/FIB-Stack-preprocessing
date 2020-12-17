@@ -354,6 +354,52 @@ def get_image_in_canvas(image, canvas,
 
     return canvas
 
+# do_nlm      : bool | will apply non local mean filter if True
+def create_3D_stack(translation, loaded_images, do_nlm=False):
+    global aligned_images
+    print("Create 3D image stack with corrected image translation")
+    width, height = loaded_images[0].shape
+    im_cnt = len(loaded_images)
+
+    if len(translation) == 0:
+        sys.exit('  - ERROR: no translation data found!')
+
+    arr = np.array(translation)
+    b   = np.delete(arr, 0, axis=1).astype(np.float)
+
+    x_translation = np.pad(b[:,0], (1, 0), 'constant')  # np.pad() adds a 0 for the first image
+    y_translation = np.pad(b[:,1], (1, 0), 'constant')
+
+    x_min, x_max = get_translation_area( x_translation )
+    y_min, y_max = get_translation_area( y_translation )
+    print(x_min, x_max)
+    print(y_min, y_max)
+
+    print('  - allocating 3D image space..')
+    aligned_images = np.zeros(( im_cnt,
+                                math.ceil(width - x_min + x_max),
+                                math.ceil(height - y_min + y_max)
+                              ), np.uint8)
+    print('  - translating and denoising images..')
+
+    coreCount = multiprocessing.cpu_count()
+    processCount = (coreCount - 1) if coreCount > 1 else 1
+    pool = multiprocessing.Pool(processCount)
+
+    x_t = 0
+    y_t = 0
+    for i in range(im_cnt):
+        #print( "  - processing {} ({} / {})".format(image, i+1, len(images)) )
+        x_t += x_translation[i]
+        y_t += y_translation[i]
+
+        pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
+
+    pool.close()
+    pool.join()
+
+    return aligned_images
+
 # main process function
 # do_nlm      : bool | will apply non local mean filter if True
 # mask_size   : float 0.0 - 1.0 | defines the size of the mask, which defines the area used for feature detection
@@ -378,58 +424,36 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
     for image in images:
         loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
 
-    print("processing {} images...".format(im_cnt))
-    if multicore:
-        process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
-    else:
-        process_translation_of_folder_singlecore( images, loaded_images, mask_size, eq_hist )
+    translation_csv = folder + os.sep + 'translations.csv'
 
-    print("processing basic data...")
-    width, height = loaded_images[0].shape
-    translation = sorted(translation)
+    if os.path.isfile(translation_csv):
+        print( "Found existing translation csv, loading...")
+        with open(translation_csv) as csv_file:
+            csv_reader = csv.reader(csv_file)
+            for i, row in enumerate(csv_reader):
+                if i > 0:
+                    translation.append([row[0],float(row[1]),float(row[2])])
+        print(translation)
+        if len(translation) != len(loaded_images):
+            print("{} contains {} lines, while {} images were found".format(translation_csv, len(translation), len(loaded_images)))
 
-    #save results
-    write_list_to_csv(translation, folder + os.sep + 'translations.csv', ['file', 'transl_x', 'transl_y'])
+    if len(translation) != len(loaded_images):
+        print("processing {} images...".format(im_cnt))
+        if multicore:
+            process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
+        else:
+            process_translation_of_folder_singlecore( images, loaded_images, mask_size, eq_hist )
 
-    if len(error_list) > 0:
-        write_list_to_csv(sorted(error_list),  folder + os.sep + 'error_list.csv',   ['file_b', 'serverity'])
+        print("processing basic data...")
+        translation = sorted(translation)
 
-    if len(translation) == 0:
-        sys.exit('ERROR: no translation data found!')
+        #save results
+        write_list_to_csv(translation, translation_csv, ['file', 'transl_x', 'transl_y'])
 
-    arr = np.array(translation)
-    b   = np.delete(arr, 0, axis=1).astype(np.float)
+        if len(error_list) > 0:
+            write_list_to_csv(sorted(error_list),  folder + os.sep + 'error_list.csv',   ['file_b', 'serverity'])
 
-    x_translation = np.pad(b[:,0], (1, 0), 'constant')  # np.pad() adds a 0 for the first image
-    y_translation = np.pad(b[:,1], (1, 0), 'constant')
-
-    x_min, x_max = get_translation_area( x_translation )
-    y_min, y_max = get_translation_area( y_translation )
-    print(x_min, x_max)
-    print(y_min, y_max)
-
-    print('allocating 3D image space..')
-    aligned_images = np.zeros(( im_cnt,
-                                math.ceil(width - x_min + x_max),
-                                math.ceil(height - y_min + y_max)
-                              ), np.uint8)
-    print('translating and denoising images..')
-
-    coreCount = multiprocessing.cpu_count()
-    processCount = (coreCount - 1) if coreCount > 1 else 1
-    pool = multiprocessing.Pool(processCount)
-
-    x_t = 0
-    y_t = 0
-    for i in range(im_cnt):
-        #print( " processing {} ({} / {})".format(image, i+1, len(images)) )
-        x_t += x_translation[i]
-        y_t += y_translation[i]
-
-        pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
-
-    pool.close()
-    pool.join()
+    aligned_images = create_3D_stack(translation, loaded_images, do_nlm)
 
     print('saving images..')
     save_path = folder + 'aligned' + os.sep
