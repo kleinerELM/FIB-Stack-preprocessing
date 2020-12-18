@@ -384,7 +384,6 @@ def processLogImages( directory ):
         convertToMP4( directory + "\\", ionAlign )
 
 
-
 if __name__ == '__main__':
     programInfo()
     processArguments()

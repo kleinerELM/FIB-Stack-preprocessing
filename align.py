@@ -9,8 +9,7 @@
 #   Bauhaus-Universität Weimar
 #   Finger-Institut für Baustoffkunde
 #
-# programmed using python 3.7, gnuplot 5.2,
-# Fiji/ImageJ 1.52k
+# programmed using python 3.7
 # don't forget to install PIL (pip install Pillow)
 #
 #########################################################
@@ -305,6 +304,8 @@ def get_find_border(arr, threshold, flip=False):
     for i, val in enumerate( arr ):
         if val > threshold:
             return i
+    print( 'ERROR: no value above the threshold of {} found'.format(threshold) )
+    print(arr)
 
 def auto_crop_stack( image_stack, threshold=10 ):
     print(' trying to auto crop image stack (threshold={})'.format(threshold))
@@ -331,11 +332,11 @@ def get_image_in_canvas_mp_wrapper(i, image, canvas, x_min, y_min, x_t, y_t, do_
 aligned_images = None
 def update_image_list(result):
     global aligned_images
-
+    print('asdf')
     result = list(result)
     aligned_images[result[0]] = result[1]
 
-# apply the translation ti the image and place it on an empty canvas
+# apply the translation to the image and place it on an empty canvas
 def get_image_in_canvas(image, canvas,
                         x_min, y_min,
                         x_t, y_t):
@@ -350,7 +351,8 @@ def get_image_in_canvas(image, canvas,
         print(canvas.shape, im.shape, d_x, d_y)
         canvas[0:im.shape[0], 0:im.shape[1]] = shift(im, shift=(d_x, d_y), mode='constant')
     else:
-        canvas[round(d_x):round(image.shape[0]+d_x), round(d_y):round(image.shape[1]+d_y)] = image
+        #print(int(round(d_x)),':',int(round(image.shape[0]+d_x)), int(round(d_y)),':',int(round(image.shape[1]+d_y)))
+        canvas[int(round(d_x)):int(round(image.shape[0]+d_x)), int(round(d_y)):int(round(image.shape[1]+d_y))] = image
 
     return canvas
 
@@ -372,8 +374,8 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
 
     x_min, x_max = get_translation_area( x_translation )
     y_min, y_max = get_translation_area( y_translation )
-    print(x_min, x_max)
-    print(y_min, y_max)
+    #print(x_min, x_max)
+    #print(y_min, y_max)
 
     print('  - allocating 3D image space..')
     aligned_images = np.zeros(( im_cnt,
@@ -384,20 +386,23 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
 
     coreCount = multiprocessing.cpu_count()
     processCount = (coreCount - 1) if coreCount > 1 else 1
-    pool = multiprocessing.Pool(processCount)
+    #pool = multiprocessing.Pool(processCount)
+
+    #print(np.mean(aligned_images))
 
     x_t = 0
     y_t = 0
     for i in range(im_cnt):
-        #print( "  - processing {} ({} / {})".format(image, i+1, len(images)) )
+        #print( "  - processing {} of {}".format(i+1, len(loaded_images)) )
         x_t += x_translation[i]
         y_t += y_translation[i]
+        i, aligned_images[i] = get_image_in_canvas_mp_wrapper(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm)
+        #pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
 
-        pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
+    #pool.close()
+    #pool.join()
 
-    pool.close()
-    pool.join()
-
+    #print(np.mean(aligned_images))
     return aligned_images
 
 # main process function
@@ -433,11 +438,11 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
             for i, row in enumerate(csv_reader):
                 if i > 0:
                     translation.append([row[0],float(row[1]),float(row[2])])
-        print(translation)
-        if len(translation) != len(loaded_images):
-            print("{} contains {} lines, while {} images were found".format(translation_csv, len(translation), len(loaded_images)))
+        #print(translation)
+        if len(translation) != len(loaded_images)-1:
+            print("{} contains {} lines, while {} lines were expected".format(translation_csv, len(translation), len(loaded_images)-1))
 
-    if len(translation) != len(loaded_images):
+    if len(translation) != len(loaded_images)-1:
         print("processing {} images...".format(im_cnt))
         if multicore:
             process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
@@ -469,7 +474,7 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
 
     print('sucessfull')
 
-    return translation, error_list, aligned_images
+    return translation, error_list, aligned_images, loaded_images
 
 def write_list_to_csv( list, filename, columns=None ):
     with open(filename, 'w', newline ='') as f:
@@ -479,6 +484,42 @@ def write_list_to_csv( list, filename, columns=None ):
             write.writerow(columns)
         write.writerows(list)
     print('saved {}'.format(filename))
+
+def get_axis_correction_list( correction_dict, z_slice_count ):
+    z_list = list(correction_dict) # get the keys from the dict (z coordinate)
+
+    min_xy = min(correction_dict.values())
+    for z, xy in correction_dict.items():
+        correction_dict[z]= xy - min_xy
+
+    #print(y_correction_dict)
+    #print('-'*20)
+    next_index = 0
+    correction_list = []
+    last_value = 0
+    for z, xy in correction_dict.items():
+        index = z_list.index(z)
+        next_index = index + 1
+        if next_index < len(z_list):
+            #print(z_list[index], z_list[next_index])
+            start_pos = z_list[index] if z_list[index] >= 0 else 0
+            end_pos = z_list[next_index] if z_list[next_index] < z_slice_count else z_slice_count
+            index_range = end_pos-start_pos
+
+            #print(start_pos, end_pos ,':')
+            for pos in range(start_pos, end_pos):
+                result = correction_dict[z_list[index]]+((correction_dict[z_list[next_index]]-correction_dict[z_list[index]])/index_range*(pos-start_pos))
+                correction_list.append(result - last_value)
+                #print(last_y, result)
+                last_value = result
+                
+        # if the last item in z_list is smaller than z_slice_count-1
+        elif z_list[index] < z_slice_count:
+            for pos in range(z_list[index], z_slice_count):
+                # fill with the last available correction
+                correction_list.append(correction_dict[z_list[index]])
+
+    return correction_list
 
 if __name__ == '__main__':
 
