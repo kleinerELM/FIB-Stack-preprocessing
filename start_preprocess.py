@@ -5,7 +5,7 @@
 # Automated Alignment and data preparation for FIB/SEM
 # image stacks
 #
-# © 2020 Florian Kleiner
+# © 2021 Florian Kleiner
 #   Bauhaus-Universität Weimar
 #   Finger-Institut für Baustoffkunde
 #
@@ -401,13 +401,6 @@ if __name__ == '__main__':
             getZResolution( workingDirectory )
             createSizeDefinitionFile()
 
-
-
-
-
-            #translation, error_list, filled_canvas = process_translation_of_folder(folder=workingDirectory, multicore=True, do_nlm=False, mask_size=0.99, eq_hist=True, crop_thresh=11 )
-            #if ( runImageJ_Script and imageJInPATH() ):
-            #    analyseImages( workingDirectory )
         else:
             print( "No matching metadata found!" )
     else:
