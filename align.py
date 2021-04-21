@@ -23,6 +23,20 @@ import multiprocessing
 
 from scipy.ndimage import shift
 import tifffile as tif
+from PIL import Image
+
+home_dir = os.path.dirname(os.path.realpath(__file__))
+# import tiff_scaling script
+ts_path = os.path.dirname( home_dir ) + '/tiff_scaling/'
+ts_file = 'set_tiff_scaling'
+if ( os.path.isdir( ts_path ) and os.path.isfile( ts_path + ts_file + '.py' ) or os.path.isfile( home_dir + ts_file + '.py' ) ):
+    if ( os.path.isdir( ts_path ) ): sys.path.insert( 1, ts_path )
+    import extract_tiff_scaling as es
+else:
+    programInfo()
+    print( 'missing ' + ts_path + ts_file + '.py!' )
+    print( 'download from https://github.com/kleinerELM/tiff_scaling' )
+    sys.exit()
 
 #remove root windows
 root = tk.Tk()
@@ -30,6 +44,18 @@ root.withdraw()
 
 translation = []
 error_list = []
+
+
+def programInfo():
+    print("#########################################################")
+    print("# A Script to align FIB-Stacks                          #")
+    print("#                                                       #")
+    print("# © 2021 Florian Kleiner                                #")
+    print("#   Bauhaus-Universität Weimar                          #")
+    print("#   F. A. Finger-Institut für Baustoffkunde             #")
+    print("#                                                       #")
+    print("#########################################################")
+    print()
 
 def is_x_near_y( x, y ):
     return (x < (y+0.02) and x > (y-0.02))
@@ -170,6 +196,12 @@ def alignImages(im1, im2, mask=None):
     im1Reg = cv2.warpPerspective(im1, h, (width, height))
 
     return im1Reg, h
+
+def alignSecondaryImageSet():
+    #height, width = im2.shape
+    #im1Reg = cv2.warpPerspective(im1, h, (width, height))
+
+    return im1Reg
 
 def denoiseNLMCV2( image ):
     t1 = time.time()
@@ -351,7 +383,7 @@ def get_image_in_canvas(image, canvas,
         print(canvas.shape, im.shape, d_x, d_y)
         canvas[0:im.shape[0], 0:im.shape[1]] = shift(im, shift=(d_x, d_y), mode='constant')
     else:
-        #print(int(round(d_x)),':',int(round(image.shape[0]+d_x)), int(round(d_y)),':',int(round(image.shape[1]+d_y)))
+        print(int(round(d_x)),':',int(round(image.shape[0]+d_x)), int(round(d_y)),':',int(round(image.shape[1]+d_y)))
         canvas[int(round(d_x)):int(round(image.shape[0]+d_x)), int(round(d_y)):int(round(image.shape[1]+d_y))] = image
 
     return canvas
@@ -396,6 +428,7 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
         #print( "  - processing {} of {}".format(i+1, len(loaded_images)) )
         x_t += x_translation[i]
         y_t += y_translation[i]
+        print(i, x_t, y_t)
         i, aligned_images[i] = get_image_in_canvas_mp_wrapper(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm)
         #pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
 
@@ -404,6 +437,39 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
 
     #print(np.mean(aligned_images))
     return aligned_images
+
+def load_image_set(folder):
+    image_paths = []
+    for file in os.listdir(folder):
+        if ( file.endswith(".tif") or file.endswith(".TIF")):
+            image_paths.append( file )
+
+    print('loading {} images...'.format(len(image_paths)))
+
+    loaded_images = []
+    for image in image_paths:
+        loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
+
+    return image_paths, loaded_images
+
+def load_translation_csv( translation_csv, expected_image_count ):
+    translation = []
+    if os.path.isfile(translation_csv):
+        print( "Found existing translation csv, loading...")
+        with open(translation_csv) as csv_file:
+            csv_reader = csv.reader(csv_file)
+            for i, row in enumerate(csv_reader):
+                if i > 0:
+                    translation.append([row[0],float(row[1]),float(row[2])])
+        #print(translation)
+        if len(translation) != expected_image_count-1:
+            print("{} contains {} lines, while {} lines were expected".format(translation_csv, len(translation), expected_image_count-1))
+
+    return translation
+
+def save_translation_csv( translation, translation_csv):
+    print('saving translation matrix to {}'.format(translation_csv))
+    write_list_to_csv(translation, translation_csv, ['file', 'transl_x', 'transl_y'])
 
 # main process function
 # do_nlm      : bool | will apply non local mean filter if True
@@ -418,31 +484,16 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
     if folder is None:
         folder = filedialog.askdirectory(title='Please select the image / working directory')
 
-    images = []
-    for file in os.listdir(folder):
-        if ( file.endswith(".tif") or file.endswith(".TIF")):
-            images.append( file )
-    im_cnt = len(images)
+    # load images
+    images, loaded_images = load_image_set( folder )
+    im_cnt = len(loaded_images)
 
-    print('loading {} images...'.format(im_cnt))
-    loaded_images = []
-    for image in images:
-        loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
-
+    # load translation table
     translation_csv = folder + os.sep + 'translations.csv'
+    translation = load_translation_csv( translation_csv, im_cnt )
 
-    if os.path.isfile(translation_csv):
-        print( "Found existing translation csv, loading...")
-        with open(translation_csv) as csv_file:
-            csv_reader = csv.reader(csv_file)
-            for i, row in enumerate(csv_reader):
-                if i > 0:
-                    translation.append([row[0],float(row[1]),float(row[2])])
-        #print(translation)
-        if len(translation) != len(loaded_images)-1:
-            print("{} contains {} lines, while {} lines were expected".format(translation_csv, len(translation), len(loaded_images)-1))
-
-    if len(translation) != len(loaded_images)-1:
+    # process translation table
+    if len(translation) != im_cnt-1:
         print("processing {} images...".format(im_cnt))
         if multicore:
             process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
@@ -453,17 +504,18 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
         translation = sorted(translation)
 
         #save results
-        write_list_to_csv(translation, translation_csv, ['file', 'transl_x', 'transl_y'])
+        save_translation_csv( translation, translation_csv)
 
         if len(error_list) > 0:
             write_list_to_csv(sorted(error_list),  folder + os.sep + 'error_list.csv',   ['file_b', 'serverity'])
 
+    # align images
     aligned_images = create_3D_stack(translation, loaded_images, do_nlm)
 
     print('saving images..')
     save_path = folder + 'aligned' + os.sep
     if not os.path.isdir(save_path): os.makedirs(save_path)
-    stack_fn = save_path + 'aligned_stack_(' + str(im_cnt) + ').tif'
+    stack_fn = save_path + "aligned_stack_({}).tif".format(im_cnt)
     tif.imsave(stack_fn, aligned_images, bigtiff=True)
     print('saved "{}"'.format(stack_fn))
     if crop_thresh > 0:
@@ -512,7 +564,7 @@ def get_axis_correction_list( correction_dict, z_slice_count ):
                 correction_list.append(result - last_value)
                 #print(last_y, result)
                 last_value = result
-                
+
         # if the last item in z_list is smaller than z_slice_count-1
         elif z_list[index] < z_slice_count:
             for pos in range(z_list[index], z_slice_count):
