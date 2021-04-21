@@ -380,10 +380,10 @@ def get_image_in_canvas(image, canvas,
                          int(image.shape[1] + math.ceil(d_y))
                        ), np.uint8)
         im[0:image.shape[0], 0:image.shape[1]] = image
-        print(canvas.shape, im.shape, d_x, d_y)
+        #print(canvas.shape, im.shape, d_x, d_y)
         canvas[0:im.shape[0], 0:im.shape[1]] = shift(im, shift=(d_x, d_y), mode='constant')
     else:
-        print(int(round(d_x)),':',int(round(image.shape[0]+d_x)), int(round(d_y)),':',int(round(image.shape[1]+d_y)))
+        #print(int(round(d_x)),':',int(round(image.shape[0]+d_x)), int(round(d_y)),':',int(round(image.shape[1]+d_y)))
         canvas[int(round(d_x)):int(round(image.shape[0]+d_x)), int(round(d_y)):int(round(image.shape[1]+d_y))] = image
 
     return canvas
@@ -397,6 +397,10 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
 
     if len(translation) == 0:
         sys.exit('  - ERROR: no translation data found!')
+
+    #if len(translation)+1 != len(loaded_images):
+    #    sys.exit('  - ERROR: translation matrix ({}) does not match the image stack size ({})'.format( len(translation)+1, len(loaded_images)))
+
 
     arr = np.array(translation)
     b   = np.delete(arr, 0, axis=1).astype(np.float)
@@ -428,7 +432,7 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
         #print( "  - processing {} of {}".format(i+1, len(loaded_images)) )
         x_t += x_translation[i]
         y_t += y_translation[i]
-        print(i, x_t, y_t)
+        #print(i, x_t, y_t)
         i, aligned_images[i] = get_image_in_canvas_mp_wrapper(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm)
         #pool.apply_async(get_image_in_canvas_mp_wrapper, args=(i, loaded_images[i], aligned_images[i], x_min, y_min, x_t, y_t, do_nlm), callback = update_image_list)
 
@@ -471,6 +475,21 @@ def save_translation_csv( translation, translation_csv):
     print('saving translation matrix to {}'.format(translation_csv))
     write_list_to_csv(translation, translation_csv, ['file', 'transl_x', 'transl_y'])
 
+def check_folder_structure(folder):
+    eds_elements = {}
+    if os.path.basename(os.path.normpath(folder)) == 'EDS Export':
+        BSE_image_path = ''
+        for file in os.listdir(folder):
+            if len(file) <= 2:
+                eds_elements[file] = folder + file + os.sep
+            elif file == 'Images':
+                BSE_image_path = folder + file + os.sep
+
+        print('identified {} elements'.format(len(eds_elements)))
+        folder = BSE_image_path
+
+    return folder, eds_elements
+
 # main process function
 # do_nlm      : bool | will apply non local mean filter if True
 # mask_size   : float 0.0 - 1.0 | defines the size of the mask, which defines the area used for feature detection
@@ -487,6 +506,10 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
     # load images
     images, loaded_images = load_image_set( folder )
     im_cnt = len(loaded_images)
+
+    # load scaling
+    scaling = es.getImageJScaling( images[0], folder )
+    scaling['y'] = scaling['y']/math.cos(38) #fix distortion due to FIB-geometry
 
     # load translation table
     translation_csv = folder + os.sep + 'translations.csv'
@@ -526,7 +549,7 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
 
     print('sucessfull')
 
-    return translation, error_list, aligned_images, loaded_images
+    return translation, error_list, aligned_images, loaded_images, scaling
 
 def write_list_to_csv( list, filename, columns=None ):
     with open(filename, 'w', newline ='') as f:
