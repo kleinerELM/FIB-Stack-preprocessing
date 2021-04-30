@@ -231,7 +231,28 @@ def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
 
 # errorhandling of the homography process
 # and extraction of the results
+def get_image_translation(filename, im1, im2, mask, mask_full):
+    error = None
+    h, _ = get_image_homography_ORB(im1, im2, mask, filename=filename + '_a')
+    #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
+    if not homography_is_translation(h):
+        print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename))
+        print(h)
+        h, _ = get_image_homography_ORB(im1, im2, mask_full, filename=filename + '_b')
+        #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
+
+        print(h)
+        if not homography_is_translation(h):
+            error = [filename, 'ERROR']
+            print('  WARNING: Homography for {} REALLY is not only a translation! '.format(filename))
+        else:
+            error = [filename, 'WARNING']
+    t_x, t_y = extract_translation_from_homography(h)
+
+    return [filename, t_x, t_y], error
+
 def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
+    #preprocess the images fortranslation
     gauss_kernel = (3, 3)
 
     im_1_denoised = cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
@@ -243,28 +264,8 @@ def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
     if eq_hist:
         im_1_denoised = cv2.equalizeHist(im_1_denoised)
         im_2_denoised = cv2.equalizeHist(im_2_denoised)
-    #im_1_denoised = cv2.equalizeHist(im1)
-    #im_2_denoised = cv2.equalizeHist(im2)
 
-    error = None
-    h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
-    #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
-    if not homography_is_translation(h):
-        print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename))
-        print(h)
-        h, _ = get_image_homography_ORB(im_1_denoised, im_2_denoised, mask_full, filename=filename + '_b')
-        #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
-
-        print(h)
-        if not homography_is_translation(h):
-            error = [filename, 'ERROR']
-            print('  WARNING: Homography for {} REALLY is not only a translation! '.format(filename))
-        else:
-            error = [filename, 'WARNING']
-    t_x, t_y = extract_translation_from_homography(h)
-    result = [filename, t_x, t_y]
-    #print('  done processing {}'.format(filename))
-    return result, error
+    return get_image_translation(filename, im_1_denoised, im_2_denoised, mask, mask_full)
 
 #singlethreaded processing
 def process_translation_of_folder_singlecore(images, loaded_images, mask_size=0.9, eq_hist=True ):
@@ -389,8 +390,10 @@ def get_image_in_canvas(image, canvas,
     return canvas
 
 # do_nlm      : bool | will apply non local mean filter if True
-def create_3D_stack(translation, loaded_images, do_nlm=False):
+# x and y seems to be swappedin parts
+def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=None, first_y_offset=None):
     global aligned_images
+
     print("Create 3D image stack with corrected image translation")
     width, height = loaded_images[0].shape
     im_cnt = len(loaded_images)
@@ -404,9 +407,21 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
 
     arr = np.array(translation)
     b   = np.delete(arr, 0, axis=1).astype(np.float)
-
-    x_translation = np.pad(b[:,0], (1, 0), 'constant')  # np.pad() adds a 0 for the first image
-    y_translation = np.pad(b[:,1], (1, 0), 'constant')
+    # np.pad() adds a 0 for the first image
+    x_translation = np.pad(b[:,0], (1, 0), 'constant')# if first_x_offset <= 0 else np.concatenate(([float(first_x_offset)],b[:,0]))
+    y_translation = np.pad(b[:,1], (1, 0), 'constant')# if first_y_offset <= 0 else np.concatenate(([float(first_y_offset)],b[:,1]))
+    if not first_x_offset is None:
+        print('found first_x_offset: {}'.format(first_x_offset))
+        #x_translation = b[:,0]
+        #x_translation[0] += float(first_x_offset)
+        y_translation = b[:,1]
+        y_translation[0] += float(first_x_offset)
+    if not first_y_offset is None:
+        print('found first_y_offset: {}'.format(first_y_offset))
+        #y_translation = b[:,1]
+        #y_translation[0] += float(first_y_offset)
+        x_translation = b[:,0]
+        x_translation[0] += float(first_y_offset)
 
     x_min, x_max = get_translation_area( x_translation )
     y_min, y_max = get_translation_area( y_translation )
@@ -429,7 +444,6 @@ def create_3D_stack(translation, loaded_images, do_nlm=False):
     x_t = 0
     y_t = 0
     for i in range(im_cnt):
-        #print( "  - processing {} of {}".format(i+1, len(loaded_images)) )
         x_t += x_translation[i]
         y_t += y_translation[i]
         #print(i, x_t, y_t)
@@ -508,9 +522,9 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
     im_cnt = len(loaded_images)
 
     # load scaling
-    scaling = es.getImageJScaling( images[0], folder )
+    #scaling = es.getImageJScaling( images[0], folder, verbose=True )
+    scaling = es.autodetectScaling( images[0], folder, verbose=True )
     scaling['y'] = scaling['y']/math.cos(38) #fix distortion due to FIB-geometry
-
     # load translation table
     translation_csv = folder + os.sep + 'translations.csv'
     translation = load_translation_csv( translation_csv, im_cnt )
@@ -595,6 +609,145 @@ def get_axis_correction_list( correction_dict, z_slice_count ):
                 correction_list.append(correction_dict[z_list[index]])
 
     return correction_list
+
+#########################################################
+#
+# EDS functions
+#
+#########################################################
+def get_full_img_translation( translation, search_pos, verbose = False ):
+    x_t = 0
+    y_t = 0
+    min_x = 0
+    min_y = 0
+    if verbose: print('~'*20)
+    for step in translation:
+        x_t += step[2]
+        y_t += step[1]
+        if min_x > x_t: min_x = x_t
+        if min_y > y_t: min_y = y_t
+
+    x_t = 0
+    y_t = 0
+    for pos, step in enumerate(translation[0:search_pos]):
+        if verbose: print(pos, (x_t, y_t), (min_x-x_t, min_y-y_t))
+        x_t += step[2]
+        y_t += step[1]
+
+    if verbose:
+        print(pos+1, (min_x, x_t), (min_y, y_t), (min_x-x_t, min_y-y_t))
+        print('this translation', step)
+
+    return (min_x, x_t), (min_y, y_t)
+
+# preprocess the raw eds images - denoising, contrast enhancing and segmentation
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(1,1))
+def preprocess_eds_image(img):
+    _, tmp = cv2.threshold( clahe.apply(cv2.medianBlur(img, 9)) , 50, 255, cv2.THRESH_TOZERO)#THRESH_TRUNC)#THRESH_BINARY
+    tmp = clahe.apply( tmp )
+
+    return clahe.apply( tmp )
+
+# process an EDS element image stack
+# eds_elements      - List of elements. Eg: ['Ca','O','Si']
+# selected_element  - string as in eds_elements - Eg: 'Ca'
+# se_translation    - Translation array [[filename, t_x, t_y],[...],...] eg from the SE dataset
+# eds_x_offset
+# eds_y_offset
+def process_element(eds_elements, selected_element, se_translation,  eds_x_offset, eds_y_offset):
+    if selected_element in eds_elements.keys():
+        print('-'*20)
+        print('selected element is {}'.format(selected_element))
+    else:
+        print('ERROR: element {} not found in the dataset'.format(selected_element))
+
+    #eds_each_nth_slice = 10
+
+    folder = eds_elements[selected_element]
+    images, loaded_images = load_image_set(folder)
+
+    image_numbering = []
+    for i, image in enumerate(loaded_images):
+        image_numbering.append( int(images[i].split(' ')[-1].split('.')[0]) )
+
+    #sort lists
+    images = [x for _, x in sorted(zip(image_numbering, images))]
+    loaded_images = [x for _, x in sorted(zip(image_numbering, loaded_images))]
+    corrected_images = loaded_images
+    if len(images) > 1:
+        shapes = []
+        shape_counts = []
+        image_numbering = []
+        for i, image in enumerate(loaded_images):
+            shape = image.shape
+            if not shape in shapes:
+                shapes.append(shape)
+                shape_counts.append(0)
+            shape_counts[-1] +=1
+
+        if len(shapes) > 1:
+            print( ' Found multiple shapes!' )
+            for i, shape in enumerate(shapes):
+                print('  found {} images with this shape:'.format(shape_counts[i]), shape)
+
+        # TODO select the indended stack?
+        ignore_first_n_images = 18#shape_counts[0]-1 if len(shapes) > 1 else 0
+        ignore_last_n_images = shape_counts[-2] if len(shapes) == 3 else 0
+        x_offset = 0
+        y_offset = 0
+
+        # correcting position of the eds image relative to the SE images
+        if ignore_first_n_images > 0:
+            t_x, t_y  = get_full_img_translation(se_translation, ignore_first_n_images)
+            print('  - eds x translation: {} - {} + {} '.format(eds_x_offset, t_x[0], t_x[1]))
+            print('  - eds y translation: {} - {} + {} '.format(eds_y_offset, t_y[0], t_y[1] ))
+            x_offset = eds_x_offset - t_x[0] + t_x[1]
+            y_offset = eds_y_offset - t_y[0] + t_y[1]
+            print('  - final translation {} and {}'.format( x_offset, y_offset ) )
+            print( - t_y[0] + t_y[1] )
+
+        if ignore_last_n_images == 0:
+            img_stack = loaded_images[ignore_first_n_images:]
+            # select images to be displayed
+            selected_translation = se_translation[ignore_first_n_images-1 :]
+            #selected_translation[0] = [selected_translation[0][0], selected_translation[0][1]+eds_x_offset, selected_translation[0][2]+eds_y_offset]
+        else:
+            loaded_images[ignore_first_n_images : ignore_last_n_images]
+            # select images to be displayed
+            selected_translation = se_translation[ignore_first_n_images-1 : ignore_last_n_images]
+            #selected_translation[0] = [selected_translation[0][0], selected_translation[0][1]+eds_x_offset, selected_translation[0][2]+eds_y_offset]
+
+        print(selected_translation[0])
+        #selected_translation[0] = [selected_translation[0][0], -50, -10]#y_offset]
+        #selected_translation[0] = [selected_translation[0][0], selected_translation[0][1]+y_offset, selected_translation[0][2]+x_offset]
+        #print(selected_translation[0])
+
+        # process eds images to reduce noise
+        print(' denoising images and enhance contrast')
+        for i, img in enumerate(img_stack):
+            img_stack[i] = preprocess_eds_image(img)
+            #_, img_stack[i] = cv2.threshold( clahe.apply(cv2.medianBlur(img, 9)) , 50, 255, cv2.THRESH_TOZERO)#THRESH_TRUNC)
+            #img_stack[i] = clahe.apply(img_stack[i])
+
+        #corrected_images = create_3D_stack(selected_translation, img_stack, do_nlm=False, first_x_offset =49, first_y_offset =471 )
+        corrected_images = create_3D_stack(selected_translation, img_stack, do_nlm=False, first_x_offset=x_offset, first_y_offset=y_offset )#52 )#x_offset = 471  y_offset should be 49-52??
+
+        cs = corrected_images.shape
+        ecs = (ignore_first_n_images + cs[0] + ignore_last_n_images, cs[1], cs[2])
+
+        if len(shapes) > 1:
+            if ignore_first_n_images > 1:
+                temp = np.zeros(ecs)
+
+                if ignore_last_n_images == 0:
+                    temp[ignore_first_n_images:,:,:] = corrected_images
+                else:
+                    temp[ignore_first_n_images:-ignore_last_n_images,:,:] = corrected_images
+
+                corrected_images = temp
+
+    return corrected_images
+
 
 if __name__ == '__main__':
 
