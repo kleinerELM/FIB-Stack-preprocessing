@@ -28,7 +28,7 @@ from PIL import Image
 home_dir = os.path.dirname(os.path.realpath(__file__))
 # import tiff_scaling script
 ts_path = os.path.dirname( home_dir ) + '/tiff_scaling/'
-ts_file = 'set_tiff_scaling'
+ts_file = 'extract_tiff_scaling'
 if ( os.path.isdir( ts_path ) and os.path.isfile( ts_path + ts_file + '.py' ) or os.path.isfile( home_dir + ts_file + '.py' ) ):
     if ( os.path.isdir( ts_path ) ): sys.path.insert( 1, ts_path )
     import extract_tiff_scaling as es
