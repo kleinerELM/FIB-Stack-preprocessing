@@ -14,7 +14,7 @@
 #
 #########################################################
 
-import os, sys, math, cv2, time
+import os, sys, math, cv2, time, re
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
@@ -234,12 +234,12 @@ def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
 def get_image_translation(filename, im1, im2, mask, mask_full):
     error = None
     h, _ = get_image_homography_ORB(im1, im2, mask, filename=filename + '_a')
-    #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
+    # h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
     if not homography_is_translation(h):
         print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename))
         print(h)
         h, _ = get_image_homography_ORB(im1, im2, mask_full, filename=filename + '_b')
-        #h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
+        # h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
 
         print(h)
         if not homography_is_translation(h):
@@ -252,14 +252,13 @@ def get_image_translation(filename, im1, im2, mask, mask_full):
     return [filename, t_x, t_y], error
 
 def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
-    #preprocess the images fortranslation
+    # preprocess the images fortranslation
     gauss_kernel = (3, 3)
 
     im_1_denoised = cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
     im_2_denoised = cv2.GaussianBlur(im2, gauss_kernel, cv2.BORDER_DEFAULT)
-
-    #im_1_denoised = cv2.medianBlur(im1, 5)
-    #im_2_denoised = cv2.medianBlur(im2, 5)
+    # im_1_denoised = cv2.medianBlur(im1, 5)
+    # im_2_denoised = cv2.medianBlur(im2, 5)
 
     if eq_hist:
         im_1_denoised = cv2.equalizeHist(im_1_denoised)
@@ -267,7 +266,7 @@ def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
 
     return get_image_translation(filename, im_1_denoised, im_2_denoised, mask, mask_full)
 
-#singlethreaded processing
+# singlethreaded processing
 def process_translation_of_folder_singlecore(images, loaded_images, mask_size=0.9, eq_hist=True ):
     print('processing image stack singlethreaded:')
     global translation
@@ -456,12 +455,32 @@ def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=Non
     #print(np.mean(aligned_images))
     return aligned_images
 
-def load_image_set(folder):
+def has_4_digit_numbers(inputString):
+    return re.search(r'\d\d\d\d', inputString)
+
+def has_5_digit_numbers(inputString):
+    return re.search(r'\d\d\d\d\d', inputString)
+
+def load_image_set(folder, limit=[]):
+    # the image numbering only uses 3 digits in basic settings
+    # if there are more than 1000 images, the order is messed up
+    # therefore in the following the script tries to check if there are
+    # "malformatted" filenames
     image_paths = []
+    image_paths_4d = []
+    image_paths_5d = []
     for file in os.listdir(folder):
         if ( file.endswith(".tif") or file.endswith(".TIF")):
-            image_paths.append( file )
+            if has_5_digit_numbers(file): image_paths_5d.append( file )
+            elif has_4_digit_numbers(file): image_paths_4d.append( file )
+            else: image_paths.append( file )
 
+    # make sure the order is correct:
+    image_paths.sort()
+    image_paths_4d.sort()
+    image_paths_5d.sort()
+    image_paths = image_paths + image_paths_4d + image_paths_5d
+    if len(limit) == 2: image_paths = image_paths[ limit[0] : limit[1] ]
     print('loading {} images...'.format(len(image_paths)))
 
     loaded_images = []
@@ -509,7 +528,7 @@ def check_folder_structure(folder):
 # mask_size   : float 0.0 - 1.0 | defines the size of the mask, which defines the area used for feature detection
 # eq_hist     : bool | improve histogram for feature detection
 # crop_thresh : in 0 - 255 | brightness value used for the auto cropper (disable with 0)
-def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, mask_size=0.9, eq_hist=True, crop_thresh=0 ):
+def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, mask_size=0.9, eq_hist=True, crop_thresh=0, limit=False ):
     global translation
     global error_list
     global aligned_images
@@ -518,7 +537,7 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
         folder = filedialog.askdirectory(title='Please select the image / working directory')
 
     # load images
-    images, loaded_images = load_image_set( folder )
+    images, loaded_images = load_image_set( folder, limit )
     im_cnt = len(loaded_images)
 
     # load scaling
