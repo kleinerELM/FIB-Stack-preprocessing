@@ -119,7 +119,9 @@ def get_image_homography_ORB(im1, im2, mask=None, filename=''):
     matches = matcher.match(descriptors1, descriptors2, None)
 
     # Sort matches by score
-    matches.sort(key=lambda x: x.distance, reverse=False)
+
+    matches = sorted(matches, key = lambda x:x.distance, reverse=False)
+    #matches.sort(key=lambda x: x.distance, reverse=False)
     # Remove not so good matches
     numGoodMatches = int(len(matches) * GOOD_MATCH_PERCENT)
     matches = matches[:numGoodMatches]
@@ -133,13 +135,15 @@ def get_image_homography_ORB(im1, im2, mask=None, filename=''):
         points2[i, :] = keypoints2[match.trainIdx].pt
 
     # Find homography
+    if len(points1) == 0 or len(points2) == 0: print("ERROR: no points found!!!")
     #h, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0) # <- wtf is the 5.0 - some method??
     h, mask = cv2.estimateAffinePartial2D(points1, points2)# cv2.RANSAC)
 
     if not homography_is_translation(h) and filename != '':
+        print("ERROR: the homography found is no translation!", h)
         # Draw top matches
-        imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
-        cv2.imwrite(os.path.dirname(os.path.realpath(__file__)) + os.sep + filename + "_matches.tif", imMatches)
+        #imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
+        #cv2.imwrite(os.path.dirname(os.path.realpath(__file__)) + os.sep + filename + "_matches.tif", imMatches)
 
     return h, mask
 
@@ -175,13 +179,16 @@ def get_image_homography_SIFT(im1, im2, mask=None, filename=''):
     points2 = np.float32([ keypoints2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
 
     # Find homography
+    if len(points1) == 0 or len(points2) == 0: print("ERROR: no points found!!!")
+    #print(points1, points2)
     #h, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0) # <- wtf is the 5.0 - some method??
     h, mask = cv2.estimateAffinePartial2D(points1, points2)# cv2.RANSAC)
 
     if not homography_is_translation(h) and filename != '':
+        print("ERROR: the homography found is no translation!", h)
         # Draw top matches
-        imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
-        cv2.imwrite(os.path.dirname(os.path.realpath(__file__)) + os.sep + filename + "_matches.tif", imMatches)
+        #imMatches = cv2.drawMatches(im1, keypoints1, im2, keypoints2, matches, None)
+        #cv2.imwrite(os.path.dirname(os.path.realpath(__file__)) + os.sep + filename + "_matches.tif", imMatches)
 
     return h, mask
 
@@ -234,14 +241,12 @@ def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
 def get_image_translation(filename, im1, im2, mask, mask_full):
     error = None
     h, _ = get_image_homography_ORB(im1, im2, mask, filename=filename + '_a')
-    # h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_a')
+    #h, _ = get_image_homography_SIFT(im1, im2, mask, filename=filename + '_a')
     if not homography_is_translation(h):
-        print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename))
-        print(h)
+        print('  WARNING: Homography for {} is not only a translation! Retrying full image'.format(filename), h)
         h, _ = get_image_homography_ORB(im1, im2, mask_full, filename=filename + '_b')
-        # h, _ = get_image_homography_SIFT(im_1_denoised, im_2_denoised, mask, filename=filename + '_b')
+        #h, _ = get_image_homography_SIFT(im1, im2, mask, filename=filename + '_b')
 
-        print(h)
         if not homography_is_translation(h):
             error = [filename, 'ERROR']
             print('  WARNING: Homography for {} REALLY is not only a translation! '.format(filename))
@@ -254,7 +259,7 @@ def get_image_translation(filename, im1, im2, mask, mask_full):
 def image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist):
     # preprocess the images fortranslation
     gauss_kernel = (3, 3)
-
+    #gauss_kernel = (7, 7)
     im_1_denoised = cv2.GaussianBlur(im1, gauss_kernel, cv2.BORDER_DEFAULT)
     im_2_denoised = cv2.GaussianBlur(im2, gauss_kernel, cv2.BORDER_DEFAULT)
     # im_1_denoised = cv2.medianBlur(im1, 5)
@@ -277,14 +282,15 @@ def process_translation_of_folder_singlecore(images, loaded_images, mask_size=0.
     mask = None
     mask_full = None
     for i, filename in enumerate( images ):
-        #print( " processing {} ({} / {}):".format(filename, i+1, len(images)) )
+        print( " processing {} ({} / {}):".format(filename, i+1, len(images)) )
         im2 = im1
         im1 = loaded_images[i]
         if not im2 is None:
             translation_line, error_list_line = image_processing_thread(filename, im1, im2, mask, mask_full, eq_hist)
 
             if error_list_line is not None:  error_list.append( error_list_line )
-            translation.append(translation_line)
+            #translation.append(translation_line)
+            translation[images.index(translation_line[0])] = translation_line
         else:
             mask      = get_centered_mask(im1, mask_size=mask_size)
             mask_full = get_centered_mask(im1, mask_size=1)
@@ -295,13 +301,14 @@ def process_translation_of_folder_singlecore(images, loaded_images, mask_size=0.
 def store_result(result):
     global translation
     global error_list
+    global images
 
     result = list(result)
-    translation.append(result[0])
+    translation[images.index(result[0][0])] = result[0]
     if not result[1] is None:  error_list.append( result[1] )
 
 def process_translation_of_folder_multicore(images, loaded_images, mask_size=0.9, eq_hist=True):
-    print('processing image stack multithreaded:')
+    print('processing image stack ({} images {}) multithreaded:'.format(len(images), len(loaded_images)))
     global translation
     global error_list
 
@@ -313,9 +320,9 @@ def process_translation_of_folder_multicore(images, loaded_images, mask_size=0.9
     coreCount = multiprocessing.cpu_count()
     processCount = (coreCount - 1) if coreCount > 1 else 1
     pool = multiprocessing.Pool(processCount)
-
+    #print(enumerate( images ))
     for i, image in enumerate( images ):
-        #print( " processing {} ({} / {})".format(image, i+1, len(images)) )
+        print( " processing {} ({} / {})".format(image, i+1, len(images)) )
         im2 = im1
         im1 = loaded_images[i]
         if not im2 is None:
@@ -403,12 +410,13 @@ def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=Non
     #if len(translation)+1 != len(loaded_images):
     #    sys.exit('  - ERROR: translation matrix ({}) does not match the image stack size ({})'.format( len(translation)+1, len(loaded_images)))
 
-
     arr = np.array(translation)
-    b   = np.delete(arr, 0, axis=1).astype(np.float)
+    b   = np.delete( np.delete(arr, 0, axis=1).astype(np.float) , 0, axis=0)
+    print(b)
     # np.pad() adds a 0 for the first image
     x_translation = np.pad(b[:,0], (1, 0), 'constant')# if first_x_offset <= 0 else np.concatenate(([float(first_x_offset)],b[:,0]))
     y_translation = np.pad(b[:,1], (1, 0), 'constant')# if first_y_offset <= 0 else np.concatenate(([float(first_y_offset)],b[:,1]))
+    #print(x_translation, y_translation)
     if not first_x_offset is None:
         print('found first_x_offset: {}'.format(first_x_offset))
         #x_translation = b[:,0]
@@ -439,7 +447,8 @@ def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=Non
     #pool = multiprocessing.Pool(processCount)
 
     #print(np.mean(aligned_images))
-
+    if im_cnt > len(y_translation) or im_cnt > len(x_translation): print( 'ERROR! There are more images ({}) than translations ({} and {})!'.format( im_cnt, len(y_translation),len(x_translation) ) )
+    else: print( 'image count  ({}) equals translations ({} and {})!'.format( im_cnt, len(y_translation),len(x_translation) ) )
     x_t = 0
     y_t = 0
     for i in range(im_cnt):
@@ -455,39 +464,74 @@ def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=Non
     #print(np.mean(aligned_images))
     return aligned_images
 
+#def has_n_digit_numbers(inputString, n=3):#
+#    needle = ''
+#    for i in range(n):
+#        needle += r'\d'
+#    return re.search(needle, inputString)
+
+def has_1_digit_numbers(inputString):
+    s = re.search(r'\d', inputString.split()[-1])
+    if s: return s.group(0)
+    else: return False
+
+def has_2_digit_numbers(inputString):
+    s = re.search(r'\d\d', inputString.split()[-1])
+    if s: return s.group(0)
+    else: return False
+
+def has_3_digit_numbers(inputString):
+    s = re.search(r'\d\d\d', inputString.split()[-1])
+    if s: return s.group(0)
+    else: return False
+
 def has_4_digit_numbers(inputString):
-    return re.search(r'\d\d\d\d', inputString)
+    s = re.search(r'\d\d\d\d', inputString.split()[-1])
+    if s: return s.group(0)
+    else: return False
 
 def has_5_digit_numbers(inputString):
-    return re.search(r'\d\d\d\d\d', inputString)
+    s = re.search(r'\d\d\d\d\d', inputString.split()[-1])
+    if s: return s.group(0)
+    else: return False
 
 def load_image_set(folder, limit=[]):
     # the image numbering only uses 3 digits in basic settings
     # if there are more than 1000 images, the order is messed up
     # therefore in the following the script tries to check if there are
     # "malformatted" filenames
-    image_paths = []
-    image_paths_4d = []
-    image_paths_5d = []
+    image_paths = {}
+    image_path_list = []
     for file in os.listdir(folder):
         if ( file.endswith(".tif") or file.endswith(".TIF")):
-            if has_5_digit_numbers(file): image_paths_5d.append( file )
-            elif has_4_digit_numbers(file): image_paths_4d.append( file )
-            else: image_paths.append( file )
+            d = has_5_digit_numbers(file)
+            if d: image_paths[int(d)] = file
+            else:
+                d = has_4_digit_numbers(file)
+                if d: image_paths[int(d)] = file
+                else:
+                    d = has_3_digit_numbers(file)
+                    if d: image_paths[int(d)] = file
+                    else:
+                        d = has_2_digit_numbers(file)
+                        if d: image_paths[int(d)] = file
+                        else:
+                            d = has_1_digit_numbers(file)
+                            if d: image_paths[int(d)] = file
+                            else: image_paths[len(image_paths)+1] = file
 
     # make sure the order is correct:
-    image_paths.sort()
-    image_paths_4d.sort()
-    image_paths_5d.sort()
-    image_paths = image_paths + image_paths_4d + image_paths_5d
-    if len(limit) == 2: image_paths = image_paths[ limit[0] : limit[1] ]
-    print('loading {} images...'.format(len(image_paths)))
+    image_paths = {key:image_paths[key] for key in sorted(image_paths.keys())}
+    image_path_list = list(image_paths.values())
+
+    if isinstance( limit, list ) and len(limit) == 2: image_path_list = image_path_list[ limit[0] : limit[1] ]
+    print('loading {} images...'.format(len(image_path_list)))
 
     loaded_images = []
-    for image in image_paths:
+    for image in image_path_list:
         loaded_images.append( cv2.imread(folder + os.sep + image, cv2.IMREAD_GRAYSCALE) )
 
-    return image_paths, loaded_images
+    return image_path_list, loaded_images
 
 def load_translation_csv( translation_csv, expected_image_count ):
     translation = []
@@ -498,7 +542,6 @@ def load_translation_csv( translation_csv, expected_image_count ):
             for i, row in enumerate(csv_reader):
                 if i > 0:
                     translation.append([row[0],float(row[1]),float(row[2])])
-        #print(translation)
         if len(translation) != expected_image_count-1:
             print("{} contains {} lines, while {} lines were expected".format(translation_csv, len(translation), expected_image_count-1))
 
@@ -550,14 +593,34 @@ def process_translation_of_folder(folder=None, multicore = True, do_nlm=False, m
 
     # process translation table
     if len(translation) != im_cnt-1:
+        translation = []
+        for f in images:
+            translation.append([f, 0.0, 0.0])
         print("processing {} images...".format(im_cnt))
-        if multicore:
-            process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
+
+        loaded_images_resized = []
+        f = 1000/loaded_images[1].shape[0]
+        if f < .95:
+            print('  reducing image size for translation calculations')
+            for i, image in enumerate( loaded_images ):
+                loaded_images_resized.append( cv2.resize(image, None, fx=f, fy=f) )
+
+            if multicore:
+                process_translation_of_folder_multicore( images, loaded_images_resized, mask_size, eq_hist )
+            else:
+                process_translation_of_folder_singlecore( images, loaded_images_resized, mask_size, eq_hist )
+
+            for i, translation_line in enumerate(translation):
+                translation[i][1] = translation_line[1]/f
+                translation[i][2] = translation_line[2]/f
         else:
-            process_translation_of_folder_singlecore( images, loaded_images, mask_size, eq_hist )
+            if multicore:
+                process_translation_of_folder_multicore( images, loaded_images, mask_size, eq_hist )
+            else:
+                process_translation_of_folder_singlecore( images, loaded_images, mask_size, eq_hist )
 
         print("processing basic data...")
-        translation = sorted(translation)
+        #translation = sorted( translation )
 
         #save results
         save_translation_csv( translation, translation_csv)
@@ -673,7 +736,7 @@ def preprocess_eds_image(img):
 # se_translation    - Translation array [[filename, t_x, t_y],[...],...] eg from the SE dataset
 # eds_x_offset
 # eds_y_offset
-def process_element(eds_elements, selected_element, se_translation,  eds_x_offset, eds_y_offset):
+def process_element(eds_elements, selected_element, se_translation,  eds_x_offset, eds_y_offset, limit=[]):
     if selected_element in eds_elements.keys():
         print('-'*20)
         print('selected element is {}'.format(selected_element))
@@ -683,7 +746,8 @@ def process_element(eds_elements, selected_element, se_translation,  eds_x_offse
     #eds_each_nth_slice = 10
 
     folder = eds_elements[selected_element]
-    images, loaded_images = load_image_set(folder)
+    images, loaded_images = load_image_set(folder, limit)
+    print(images)
 
     image_numbering = []
     for i, image in enumerate(loaded_images):
