@@ -22,8 +22,13 @@ import csv
 import multiprocessing
 
 from scipy.ndimage import shift
+import pandas as pd
 import tifffile as tif
 from PIL import Image
+
+from skimage.filters import threshold_multiotsu
+from skimage.segmentation import slic, mark_boundaries
+from skimage import color
 
 home_dir = os.path.dirname(os.path.realpath(__file__))
 # import tiff_scaling script
@@ -320,7 +325,7 @@ def process_translation_of_folder_multicore(images, loaded_images, mask_size=0.9
     coreCount = multiprocessing.cpu_count()
     processCount = (coreCount - 1) if coreCount > 1 else 1
     pool = multiprocessing.Pool(processCount)
-    #print(enumerate( images ))
+
     for i, image in enumerate( images ):
         print( " processing {} ({} / {})".format(image, i+1, len(images)) )
         im2 = im1
@@ -412,7 +417,7 @@ def create_3D_stack(translation, loaded_images, do_nlm=False, first_x_offset=Non
 
     arr = np.array(translation)
     b   = np.delete( np.delete(arr, 0, axis=1).astype(np.float) , 0, axis=0)
-    print(b)
+    #print(b)
     # np.pad() adds a 0 for the first image
     x_translation = np.pad(b[:,0], (1, 0), 'constant')# if first_x_offset <= 0 else np.concatenate(([float(first_x_offset)],b[:,0]))
     y_translation = np.pad(b[:,1], (1, 0), 'constant')# if first_y_offset <= 0 else np.concatenate(([float(first_y_offset)],b[:,1]))
@@ -831,7 +836,53 @@ def process_element(eds_elements, selected_element, se_translation,  eds_x_offse
 
     return corrected_images
 
+#########################################################
+#
+# processing of EDX data using superpixels via SLIC
+#
+#########################################################
+elements_SLIC      = {}
+elements_mean_SLIC = {}
 
+# find superpixel
+def get_SLIC_segments( img_clahe, element=None, i=None, n_segments=500, compactness=0.2 ):
+    segments_slic = slic(cv2.medianBlur(cv2.equalizeHist(img_clahe), ksize=5), n_segments=n_segments, compactness=compactness, sigma=1, start_label=1)
+
+    # get mean color of superpixel
+    return [segments_slic, element, i ]
+
+def SLIC_segment_processing(result):
+    global elements_SLIC
+
+    segments_slic = result[0]
+    element       = result[1]
+    i             = result[2]
+
+    elements_SLIC[element][i]      = segments_slic
+
+# get mean color of the superpixel
+def get_SLIC_mean_Image( img_clahe, segments_slic, element=None, i=None, threshold=50 ):
+    mean_slic = cv2.equalizeHist(np.uint8( color.rgb2gray( color.label2rgb(segments_slic, img_clahe, kind='avg', bg_label=0) ) * 255))
+
+    #remove very low values
+    mean_slic[mean_slic<threshold] = 0
+
+    return [mean_slic, element, i ]
+
+def SLIC_mean_processing(result):
+    global elements_mean_SLIC
+
+    mean_slic     = result[0]
+    element       = result[1]
+    i             = result[2]
+
+    elements_mean_SLIC[element][i] = mean_slic
+
+#########################################################
+#
+# This is propably outdated.
+#
+#########################################################
 if __name__ == '__main__':
 
     # Read reference image
