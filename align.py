@@ -30,6 +30,8 @@ from skimage.filters import threshold_multiotsu
 from skimage.segmentation import slic, mark_boundaries
 from skimage import color
 
+import bm3d
+
 home_dir = os.path.dirname(os.path.realpath(__file__))
 # import tiff_scaling script
 ts_path = os.path.dirname( home_dir ) + '/tiff_scaling/'
@@ -217,7 +219,7 @@ def alignSecondaryImageSet():
 
 def denoiseNLMCV2( image ):
     t1 = time.time()
-    print( "  denoising image using OpenCV2", flush=True )
+    print( "  denoising image using NLM in OpenCV2", flush=True )
     denoised = np.zeros(image.shape, np.uint8) # empty image
     cv2.fastNlMeansDenoising( image,
                             denoised,
@@ -228,6 +230,24 @@ def denoiseNLMCV2( image ):
     print( ", took %f s" % (time.time() - t1) )
 
     return denoised
+
+def denoiseBM3D( image ):
+    t1 = time.time()
+    print( "  denoising image using BM3D", flush=True )
+    denoised = np.zeros(image.shape, np.uint8) # empty image
+    cv2.fastNlMeansDenoising( image,
+                            denoised,
+                            h=15,
+                            templateWindowSize=7,
+                            searchWindowSize=(15+1)
+                            )
+
+    denoised = bm3d.bm3d(image, sigma_psd=0.2, stage_arg=bm3d.BM3DStages.ALL_STAGES )
+
+    print( ", took %f s" % (time.time() - t1) )
+
+    return denoised
+
 
 def get_centered_mask( ref_img, mask_size=0.7, mask_values=255):
     mask = np.zeros(ref_img.shape, np.uint8) # empty mask
@@ -369,7 +389,8 @@ def auto_crop_stack( image_stack, threshold=10 ):
 def get_image_in_canvas_mp_wrapper(i, image, canvas, x_min, y_min, x_t, y_t, do_nlm):
     canvas = get_image_in_canvas(image, canvas, x_min, y_min, x_t, y_t)
     if do_nlm:
-        canvas = denoiseNLMCV2(canvas)
+        #canvas = denoiseNLMCV2(canvas)
+        canvas = denoiseBM3D(canvas)
     return i, canvas
 
 # result processing after multithreaded processing
